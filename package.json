@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node server.ts",
-    "start": "NODE_ENV=production node server.ts",
+    "dev": "node server.ts --dev",
+    "start": "node server.ts",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",

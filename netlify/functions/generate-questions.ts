@@ -273,13 +273,34 @@ async function callGemini(parts: Part[], apiKey: string, model: string): Promise
   }
 }
 
+const DEPRECATED_MODELS = new Set([
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-pro',
+  'gemini-2.0-flash',
+  'gemini-2.0-pro',
+  'gemini-2.0-flash-thinking',
+])
+
+function resolveGeminiModel(raw: string | undefined): string {
+  const candidate = (raw ?? '').trim().replace(/^models\//i, '')
+  if (!candidate || /\s/.test(candidate) || !/^gemini-[a-z0-9][a-z0-9._-]*$/i.test(candidate)) {
+    return 'gemini-4-hydrogen'
+  }
+  if (DEPRECATED_MODELS.has(candidate.toLowerCase())) {
+    return 'gemini-4-hydrogen'
+  }
+  return candidate
+}
+
 export default async (req: Request) => {
   if (req.method !== 'POST') return new Response('Method not allowed', { status: 405 })
 
-  const supabaseUrl = process.env.SUPABASE_URL
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  const geminiKey = process.env.GEMINI_API_KEY
-  if (!supabaseUrl || !serviceRoleKey) return json({ error: 'Server is not configured yet.', code: 'not_configured' }, 500)
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim()
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+  const anonKey = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || '').trim()
+  const geminiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || '').trim()
+  if (!supabaseUrl || (!serviceRoleKey && !anonKey)) return json({ error: 'Server is not configured yet.', code: 'not_configured' }, 500)
   if (!geminiKey) {
     return json({ error: "Question generation isn't set up yet — add GEMINI_API_KEY.", code: 'not_configured' }, 500)
   }
@@ -287,7 +308,9 @@ export default async (req: Request) => {
   const token = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
   if (!token) return json({ error: 'Missing auth token' }, 401)
 
-  const admin = createClient(supabaseUrl, serviceRoleKey)
+  const admin = serviceRoleKey
+    ? createClient(supabaseUrl, serviceRoleKey)
+    : createClient(supabaseUrl, anonKey, { global: { headers: { Authorization: `Bearer ${token}` } } })
   const { data: userData, error: userError } = await admin.auth.getUser(token)
   if (userError || !userData.user) return json({ error: 'Invalid session' }, 401)
   const { data: caller } = await admin.from('profiles').select('role').eq('id', userData.user.id).single()
@@ -311,7 +334,7 @@ export default async (req: Request) => {
     .single()
   if (!mod) return json({ error: 'Module not found' }, 404)
 
-  const model = process.env.GEMINI_MODEL || 'gemini-4-hydrogen'
+  const model = resolveGeminiModel(process.env.GEMINI_MODEL)
 
   try {
     const parts = await materialParts(mod, transcript)
