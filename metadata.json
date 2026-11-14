@@ -1,0 +1,8 @@
+{
+  "name": "Captain LMS",
+  "description": "Learning Management System (LMS) with employee dashboards, course catalog, quizzes, admin controls, and manager views.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
