@@ -13,6 +13,7 @@
 
 import { createClient } from '@supabase/supabase-js'
 import JSZip from 'jszip'
+import { GoogleGenAI, Type, type Part as GenAiPart } from '@google/genai'
 
 const SYSTEM_PROMPT = `You are an expert instructional designer who writes high-quality multiple-choice quiz questions for an online learning platform.
 
@@ -201,94 +202,75 @@ function balanceAnswers(questions: GeneratedQuestion[]): GeneratedQuestion[] {
   })
 }
 
-async function callGemini(parts: Part[], apiKey: string, model: string, timeoutMs: number, level = 0): Promise<string> {
-  // level 0: full request; 1: without the speed (thinking) setting; 2: also without the strict output
-  // schema. Different Gemini models accept different options, so degrade instead of failing outright.
-  const doFetch = () =>
-    fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': apiKey },
-    signal: AbortSignal.timeout(timeoutMs),
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ role: 'user', parts: [...parts, { text: USER_PROMPT }] }],
-      generationConfig: {
-        temperature: 0.4,
+function toGenAiParts(parts: Part[]): GenAiPart[] {
+  return parts.map((p) => {
+    if ('text' in p) return { text: p.text }
+    if ('inline_data' in p) return { inlineData: { mimeType: p.inline_data.mime_type, data: p.inline_data.data } }
+    return { fileData: { fileUri: p.file_data.file_uri } }
+  })
+}
+
+async function callGemini(parts: Part[], apiKey: string, model: string): Promise<string> {
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
+    },
+  })
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: { parts: [...toGenAiParts(parts), { text: USER_PROMPT }] },
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
         responseMimeType: 'application/json',
-        ...(level < 2 ? { responseSchema: {
-          type: 'ARRAY',
+        responseSchema: {
+          type: Type.ARRAY,
           items: {
-            type: 'OBJECT',
+            type: Type.OBJECT,
             properties: {
-              question: { type: 'STRING' },
-              options: { type: 'ARRAY', items: { type: 'STRING' } },
-              correct_index: { type: 'INTEGER' },
-              difficulty: { type: 'STRING', enum: ['easy', 'medium', 'hard'] },
+              question: { type: Type.STRING },
+              options: { type: Type.ARRAY, items: { type: Type.STRING } },
+              correct_index: { type: Type.INTEGER },
+              difficulty: { type: Type.STRING, enum: ['easy', 'medium', 'hard'] },
             },
             required: ['question', 'options', 'correct_index', 'difficulty'],
           },
-        } } : {}),
-        ...(level === 0 ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        },
       },
-    }),
-  })
-  let res: Response
-  try {
-    res = await doFetch()
-  } catch {
-    throw new UserFacingError('Gemini took too long to respond.', 'timeout', 504)
-  }
-
-  if (res.status === 429) {
-    throw new UserFacingError('Gemini free-tier limit reached. Nothing was lost — wait about a minute and try again.', 'rate_limit', 429)
-  }
-  if (!res.ok) {
-    const detail = await res.text()
-    let message = detail.slice(0, 300)
-    try {
-      message = (JSON.parse(detail) as { error?: { message?: string } }).error?.message ?? message
-    } catch {
-      // keep raw text
+    })
+    const text = (response.text ?? '').trim()
+    if (!text) throw new UserFacingError('Gemini returned nothing for this material.', 'empty', 422)
+    return text
+  } catch (err) {
+    if (err instanceof UserFacingError) throw err
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('Gemini error:', message)
+    if (/429|RESOURCE_EXHAUSTED|quota/i.test(message)) {
+      throw new UserFacingError(
+        'Gemini quota or rate limit reached. Nothing was lost — wait about a minute and try again.',
+        'rate_limit',
+        429,
+      )
     }
-    console.error('Gemini error', res.status, message)
-    if (/api key/i.test(message)) throw new UserFacingError('The Gemini API key is invalid or missing.', 'bad_key', 500)
-    if (res.status === 400 && level < 2 && /invalid argument|think|schema/i.test(message)) {
-      return callGemini(parts, apiKey, model, timeoutMs, level + 1)
+    if (/403|PERMISSION_DENIED|API_KEY_INVALID|api key/i.test(message)) {
+      throw new UserFacingError('The Gemini API key is invalid or missing.', 'bad_key', 500)
     }
-    if (res.status === 404) {
-      throw new UserFacingError(`Gemini model "${model}" isn't available for this key. Set GEMINI_MODEL in Netlify to another model (e.g. gemini-2.0-flash).`, 'bad_model', 500)
+    if (/404|NOT_FOUND/i.test(message)) {
+      throw new UserFacingError(
+        `Gemini model "${model}" isn't available for this key. Set GEMINI_MODEL to gemini-4-hydrogen.`,
+        'bad_model',
+        500,
+      )
     }
-    if (res.status === 400 || res.status === 403) throw new UserFacingError(`Gemini could not read this material: ${message}`, 'unreadable', 422)
-    throw new UserFacingError(`Gemini error ${res.status}: ${message}`, 'upstream', 502)
+    if (/400|transcript|caption|unavailable/i.test(message)) {
+      throw new UserFacingError(`Gemini could not read this material: ${message}`, 'unreadable', 422)
+    }
+    throw new UserFacingError(`Gemini error: ${message.slice(0, 240)}`, 'upstream', 502)
   }
-
-  const data = (await res.json()) as {
-    candidates?: { content?: { parts?: { text?: string }[] }; finishReason?: string }[]
-  }
-  const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? ''
-  if (!text) throw new UserFacingError('Gemini returned nothing for this material.', 'empty', 422)
-  return text
-}
-
-// Google renames/retires models over time. If the configured one is gone for this key, ask the API
-// which models exist and pick the newest plain "flash" model that supports generateContent.
-async function listFlashModels(apiKey: string): Promise<string[]> {
-  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', {
-    headers: { 'x-goog-api-key': apiKey },
-    signal: AbortSignal.timeout(5000),
-  })
-  if (!res.ok) return []
-  const data = (await res.json()) as { models?: { name: string; supportedGenerationMethods?: string[] }[] }
-  const names = (data.models ?? [])
-    .filter((m) => m.supportedGenerationMethods?.includes('generateContent'))
-    .map((m) => m.name.replace(/^models\//, ''))
-  // Newest models are usually the most overloaded, so try the light ("lite") ones first, newest to
-  // oldest, then the regular Flash ones from oldest (most settled) to newest.
-  const flash = names.filter((n) => /^gemini-[\d.]+-flash(-lite)?$/.test(n))
-  const version = (n: string) => parseFloat(n.split('-')[1])
-  const lite = flash.filter((n) => n.endsWith('-lite')).sort((a, b) => version(b) - version(a))
-  const regular = flash.filter((n) => !n.endsWith('-lite')).sort((a, b) => version(a) - version(b))
-  return [...lite, ...regular]
 }
 
 export default async (req: Request) => {
@@ -299,7 +281,7 @@ export default async (req: Request) => {
   const geminiKey = process.env.GEMINI_API_KEY
   if (!supabaseUrl || !serviceRoleKey) return json({ error: 'Server is not configured yet.', code: 'not_configured' }, 500)
   if (!geminiKey) {
-    return json({ error: 'Question generation isn\'t set up yet — add GEMINI_API_KEY in Netlify.', code: 'not_configured' }, 500)
+    return json({ error: "Question generation isn't set up yet — add GEMINI_API_KEY.", code: 'not_configured' }, 500)
   }
 
   const token = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
@@ -329,72 +311,27 @@ export default async (req: Request) => {
     .single()
   if (!mod) return json({ error: 'Module not found' }, 404)
 
-  const started = Date.now()
-  const BUDGET_MS = 24_000 // Netlify cuts synchronous functions off at ~26-30s
-  const left = () => BUDGET_MS - (Date.now() - started)
-  const tried = new Set<string>()
-  const attempts: string[] = []
-  let queue = [process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite']
-  let listed = false
+  const model = process.env.GEMINI_MODEL || 'gemini-4-hydrogen'
 
   try {
     const parts = await materialParts(mod, transcript)
-    let lastProblem = ''
-    let lastError: UserFacingError | null = null
-
-    while (left() > 4000) {
-      const model = queue.find((m) => !tried.has(m))
-      if (!model) {
-        if (listed) break
-        listed = true
-        queue = [...queue, ...(await listFlashModels(geminiKey).catch(() => []))]
-        continue
-      }
-      tried.add(model)
-
-      let reply: string
-      const t0 = Date.now()
-      try {
-        // Cap each attempt so one slow model can't eat the whole budget.
-        reply = await callGemini(parts, geminiKey, model, Math.min(left(), 14_000))
-      } catch (e) {
-        if (!(e instanceof UserFacingError)) throw e
-        lastError = e
-        attempts.push(`${model}: ${e.code} (${Math.round((Date.now() - t0) / 1000)}s)`)
-        if (e.code === 'unreadable' && mod.youtube_id && !transcript.trim()) {
-          throw new UserFacingError(
-            "Couldn't read this video automatically (it may be private or have no captions). Paste its transcript below and try again.",
-            'need_transcript',
-          )
-        }
-        // Overloaded, missing, slow, or fussy model: move on to the next candidate.
-        if (['upstream', 'bad_model', 'timeout', 'empty', 'unreadable'].includes(e.code)) continue
-        throw e
-      }
-
-      try {
-        const questions = balanceAnswers(validate(parseJson(reply)))
-        return json({ questions, model })
-      } catch (e) {
-        lastProblem = e instanceof Error ? e.message : 'Invalid reply'
-        tried.delete(model) // the same model may answer properly on a second go
-        if (tried.size > 6) break
-      }
-    }
-
-    if (mod.youtube_id && !transcript.trim()) {
-      throw new UserFacingError(
-        "Couldn't read this video in time (long videos take a while). Paste its transcript below and try again.",
-        'need_transcript',
-      )
-    }
-    if (lastProblem) {
-      return json({ error: `The AI's reply wasn't usable (${lastProblem}). Try again.`, code: 'invalid_reply' }, 502)
-    }
-    console.error('All attempts failed', attempts)
-    throw new UserFacingError(`${lastError?.message ?? 'Gemini is busy right now. Try again in a minute.'} [${attempts.join('; ')}]`, lastError?.code ?? 'upstream', lastError?.status ?? 503)
+    const reply = await callGemini(parts, geminiKey, model)
+    const questions = balanceAnswers(validate(parseJson(reply)))
+    return json({ questions, model })
   } catch (e) {
-    if (e instanceof UserFacingError) return json({ error: e.message, code: e.code }, e.status)
+    if (e instanceof UserFacingError) {
+      if (e.code === 'unreadable' && mod.youtube_id && !transcript.trim()) {
+        return json(
+          {
+            error:
+              "Couldn't read this video automatically (it may be private or have no captions). Paste its transcript below and try again.",
+            code: 'need_transcript',
+          },
+          422,
+        )
+      }
+      return json({ error: e.message, code: e.code }, e.status)
+    }
     return json({ error: 'Something went wrong while generating questions.', code: 'unknown' }, 500)
   }
 }

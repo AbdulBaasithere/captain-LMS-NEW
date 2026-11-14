@@ -165,7 +165,27 @@ const router = createRouter({
         },
       ],
     },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
+})
+
+// Recover cleanly when a new deployment replaces hashed lazy-route chunks while an older tab is open
+router.onError((err, to) => {
+  const msg = err instanceof Error ? err.message : String(err)
+  const isChunkLoadError =
+    msg.includes('Failed to fetch dynamically imported module') ||
+    msg.includes('Importing a module script failed') ||
+    msg.includes('Unable to preload CSS')
+
+  if (isChunkLoadError && typeof window !== 'undefined') {
+    const key = `chunk_reload:${to.fullPath}`
+    if (!window.sessionStorage.getItem(key)) {
+      window.sessionStorage.setItem(key, '1')
+      window.location.assign(to.fullPath)
+      return
+    }
+  }
+  console.error('Router navigation error:', err)
 })
 
 router.beforeEach(async (to) => {

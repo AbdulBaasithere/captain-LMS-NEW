@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
@@ -24,11 +24,12 @@ import type { Module, QuizQuestion, Department, Course } from '@/lib/database.ty
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
-const moduleId = Number(route.params.id)
+const moduleId = computed(() => Number(route.params.id))
 
 const module_ = ref<Module | null>(null)
 const questions = ref<QuizQuestion[]>([])
 const loading = ref(true)
+const loadError = ref('')
 
 const departments = ref<Department[]>([])
 const detailTitle = ref('')
@@ -84,28 +85,59 @@ function pickDefaultPreviewTab(mod: Module | null) {
 
 async function load() {
   loading.value = true
-  const [{ data: rawMod }, { data: qs }, depts, { data: cs }] = await Promise.all([
-    supabase.from('modules').select('*').eq('id', moduleId).single(),
-    supabase.from('quiz_questions').select('*').eq('module_id', moduleId).order('id'),
-    loadDepartments(),
-    supabase.from('courses').select('id, title').order('title'),
-  ])
-  const mod = await hydrateModuleUploadedVideo((rawMod as Module | null) ?? null)
-  courseOptions.value = (cs ?? []) as Pick<Course, 'id' | 'title'>[]
-  module_.value = mod
-  questions.value = qs ?? []
-  scheduledDate.value = mod?.scheduled_date ?? ''
-  departments.value = depts
-  detailTitle.value = mod?.title ?? ''
-  detailDepartment.value = mod?.department ?? 'General'
-  detailYoutubeId.value = mod?.youtube_id ?? ''
-  detailQuizRequired.value = mod?.quiz_required ?? true
-  detailCourse.value = mod?.course_id ?? ''
-  pickDefaultPreviewTab(mod)
-  loading.value = false
+  loadError.value = ''
+  const id = moduleId.value
+  if (!Number.isFinite(id) || id <= 0) {
+    module_.value = null
+    loadError.value = 'Invalid module ID.'
+    loading.value = false
+    return
+  }
+
+  try {
+    const [{ data: rawMod, error: modErr }, { data: qs }, depts, { data: cs }] = await Promise.all([
+      supabase.from('modules').select('*').eq('id', id).maybeSingle(),
+      supabase.from('quiz_questions').select('*').eq('module_id', id).order('id'),
+      loadDepartments(),
+      supabase.from('courses').select('id, title').order('title'),
+    ])
+    if (modErr) {
+      module_.value = null
+      loadError.value = modErr.message || 'Could not load module details.'
+      return
+    }
+    if (!rawMod) {
+      module_.value = null
+      loadError.value = `Module #${id} was not found.`
+      return
+    }
+    const mod = await hydrateModuleUploadedVideo(rawMod as Module)
+    courseOptions.value = (cs ?? []) as Pick<Course, 'id' | 'title'>[]
+    module_.value = mod
+    questions.value = (qs ?? []).map((q) => ({
+      ...q,
+      options: Array.isArray(q.options) ? q.options : [],
+    }))
+    scheduledDate.value = mod?.scheduled_date ?? ''
+    departments.value = depts
+    detailTitle.value = mod?.title ?? ''
+    detailDepartment.value = mod?.department ?? 'General'
+    detailYoutubeId.value = mod?.youtube_id ?? ''
+    detailQuizRequired.value = mod?.quiz_required ?? true
+    detailCourse.value = mod?.course_id ?? ''
+    pickDefaultPreviewTab(mod)
+  } catch (err) {
+    module_.value = null
+    loadError.value = err instanceof Error ? err.message : 'Unexpected error loading module.'
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(load)
+watch(moduleId, () => {
+  void load()
+})
 
 async function saveDetails() {
   if (!detailTitle.value.trim()) return
@@ -128,7 +160,7 @@ async function saveDetails() {
       // 5-module grouping, so this is ignored for them either way.
       quiz_required: detailDepartment.value === 'General' ? detailQuizRequired.value : true,
     })
-    .eq('id', moduleId)
+    .eq('id', moduleId.value)
   await logActivity(auth.profile?.id, `Updated details for "${detailTitle.value.trim()}"`)
   savingDetails.value = false
   if (youtubeId) activePreviewTab.value = 'youtube'
@@ -138,13 +170,14 @@ async function saveDetails() {
 async function onVideoSelected(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
+  const id = moduleId.value
   videoError.value = ''
   uploadingVideo.value = true
   const previousVideoUrl = module_.value?.video_url ?? null
   try {
     const [probedDuration, uploadRes] = await Promise.all([
       probeVideoDurationSeconds(file),
-      uploadModuleVideo(moduleId, file),
+      uploadModuleVideo(id, file),
     ])
     const { url, type, error } = uploadRes
     if (error || !url || !type) {
@@ -152,7 +185,7 @@ async function onVideoSelected(e: Event) {
       return
     }
     const { error: saveErr } = await saveModuleUploadedVideo(
-      moduleId,
+      id,
       url,
       type,
       probedDuration,
@@ -178,7 +211,7 @@ async function onVideoSelected(e: Event) {
 }
 
 async function removeUploadedVideo() {
-  await clearModuleUploadedVideo(moduleId, module_.value?.video_url)
+  await clearModuleUploadedVideo(moduleId.value, module_.value?.video_url)
   await logActivity(auth.profile?.id, `Removed the uploaded video from "${module_.value?.title}"`)
   if (module_.value?.youtube_id) activePreviewTab.value = 'youtube'
   else if (module_.value?.document_url) activePreviewTab.value = 'document'
@@ -188,15 +221,16 @@ async function removeUploadedVideo() {
 async function onMaterialSelected(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file) return
+  const id = moduleId.value
   materialError.value = ''
   uploadingMaterial.value = true
   const previousDocUrl = module_.value?.document_url ?? null
   try {
-    const { url, type, error } = await uploadModuleMaterial(moduleId, file)
+    const { url, type, error } = await uploadModuleMaterial(id, file)
     if (error || !url || !type) {
       materialError.value = error ?? 'Upload failed.'
     } else {
-      await supabase.from('modules').update({ document_url: url, document_type: type }).eq('id', moduleId)
+      await supabase.from('modules').update({ document_url: url, document_type: type }).eq('id', id)
       if (previousDocUrl && previousDocUrl !== url) {
         await deleteMaterialFile(previousDocUrl)
       }
@@ -214,7 +248,7 @@ async function removeMaterial() {
   if (module_.value?.document_url) {
     await deleteMaterialFile(module_.value.document_url)
   }
-  await supabase.from('modules').update({ document_url: null, document_type: null }).eq('id', moduleId)
+  await supabase.from('modules').update({ document_url: null, document_type: null }).eq('id', moduleId.value)
   await logActivity(auth.profile?.id, `Removed the uploaded document from "${module_.value?.title}"`)
   if (module_.value?.youtube_id) activePreviewTab.value = 'youtube'
   else if (module_.value?.video_url) activePreviewTab.value = 'uploaded_video'
@@ -231,7 +265,7 @@ async function addQuestion() {
   if (!newQuestion.value.trim() || newOptions.value.some((o) => !o.trim())) return
   savingQuestion.value = true
   await supabase.from('quiz_questions').insert({
-    module_id: moduleId,
+    module_id: moduleId.value,
     question: newQuestion.value.trim(),
     options: newOptions.value.map((o) => o.trim()),
     correct_index: newCorrect.value,
@@ -284,7 +318,7 @@ async function saveBulk() {
   savingBulk.value = true
   await supabase.from('quiz_questions').insert(
     bulkPreview.value.map((q) => ({
-      module_id: moduleId,
+      module_id: moduleId.value,
       question: q.question,
       options: q.options,
       correct_index: q.correct_index,
@@ -327,7 +361,7 @@ async function runGenerate() {
   generating.value = true
   genError.value = ''
   showGeneratePrompt.value = false
-  const result = await generateQuestions(moduleId, transcript.value)
+  const result = await generateQuestions(moduleId.value, transcript.value)
   generating.value = false
   if (result.questions) {
     needTranscript.value = false
@@ -345,11 +379,12 @@ async function addDrafts() {
     genError.value = 'Fill in every question and option (or untick the ones you don’t want).'
     return
   }
+  const id = moduleId.value
   addingDrafts.value = true
-  if (genMode.value === 'replace') await supabase.from('quiz_questions').delete().eq('module_id', moduleId)
+  if (genMode.value === 'replace') await supabase.from('quiz_questions').delete().eq('module_id', id)
   await supabase.from('quiz_questions').insert(
     chosen.map((d) => ({
-      module_id: moduleId,
+      module_id: id,
       question: d.question.trim(),
       options: d.options.map((o) => o.trim()),
       correct_index: d.correct_index,
@@ -370,7 +405,7 @@ async function togglePublish() {
   await supabase
     .from('modules')
     .update({ is_draft: !module_.value.is_draft })
-    .eq('id', moduleId)
+    .eq('id', moduleId.value)
   await logActivity(
     auth.profile?.id,
     `${nowPublishing ? 'Published' : 'Unpublished'} "${module_.value.title}"`,
@@ -382,6 +417,7 @@ async function togglePublish() {
 const deleting = ref(false)
 async function deleteModule() {
   if (!module_.value) return
+  const id = moduleId.value
   const ok = window.confirm(
     `Delete "${module_.value.title}" permanently?
 
@@ -390,7 +426,7 @@ This also removes its questions, its uploaded file, and every employee's complet
   if (!ok) return
   deleting.value = true
   const title = module_.value.title
-  const { error } = await supabase.from('modules').delete().eq('id', moduleId)
+  const { error } = await supabase.from('modules').delete().eq('id', id)
   if (error) {
     deleting.value = false
     window.alert(`Could not delete: ${error.message}`)
@@ -398,7 +434,7 @@ This also removes its questions, its uploaded file, and every employee's complet
   }
   await Promise.all([
     deleteMaterialFile(module_.value.document_url),
-    clearModuleUploadedVideo(moduleId, module_.value.video_url),
+    clearModuleUploadedVideo(id, module_.value.video_url),
   ])
   await logActivity(auth.profile?.id, `Deleted module "${title}"`)
   router.push('/admin/modules')
@@ -409,7 +445,7 @@ async function saveSchedule() {
   await supabase
     .from('modules')
     .update({ scheduled_date: scheduledDate.value || null })
-    .eq('id', moduleId)
+    .eq('id', moduleId.value)
   await logActivity(
     auth.profile?.id,
     scheduledDate.value
@@ -796,6 +832,14 @@ async function saveSchedule() {
       <p v-if="!questions.length" style="padding: 24px; text-align: center; color: var(--ink-soft)">
         No questions yet — add some above.
       </p>
+    </div>
+  </div>
+  <div v-else class="card" style="padding: 24px; max-width: 520px">
+    <h3 style="margin-bottom: 6px">Could not open module</h3>
+    <p class="hint" style="margin-bottom: 14px">{{ loadError || 'This module could not be loaded.' }}</p>
+    <div style="display: flex; gap: 8px">
+      <button class="btn btn-primary btn-sm" @click="load">Retry</button>
+      <button class="btn btn-ghost btn-sm" @click="router.push('/admin/modules')">Back to modules</button>
     </div>
   </div>
 </template>
