@@ -288,6 +288,7 @@ async function grantExtra(milestone: string) {
         <label>Role</label>
         <select v-model="editRole">
           <option value="employee">Employee</option>
+          <option value="hr">HR</option>
           <option value="manager">Manager</option>
           <option value="admin">Admin</option>
         </select>

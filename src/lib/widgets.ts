@@ -20,6 +20,7 @@ export const WIDGETS: WidgetDef[] = [
   { id: 'emp.leaderboard', role: 'Employee', name: 'Leaderboard', description: 'Menu page · podium and ranking', where: 'Employee menu' },
   { id: 'emp.calendar', role: 'Employee', name: 'Deadline calendar', description: 'Menu page · month view of due dates', where: 'Employee menu' },
   { id: 'emp.certs', role: 'Employee', name: 'Certificates & badges', description: 'Menu page · achievements gallery', where: 'Employee menu' },
+  { id: 'emp.kpis', role: 'Employee', name: 'Personal KPIs & Transcript', description: 'Dashboard tab · personal completion, quiz trends, and PDF/CSV transcript', where: 'Employee dashboard' },
   { id: 'mgr.stats', role: 'Manager', name: 'Team summary tiles', description: 'Team progress · size, completion, at risk, overdue', where: 'Manager dashboard' },
   { id: 'mgr.table', role: 'Manager', name: 'Team progress table', description: 'Team progress · per-person bars and status', where: 'Manager dashboard' },
   { id: 'mgr.heatmap', role: 'Manager', name: 'Team heatmap', description: 'Menu page · people by course grid', where: 'Manager menu' },

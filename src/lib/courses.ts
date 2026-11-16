@@ -18,7 +18,18 @@ export {
   type CatalogFilterCriteria,
 }
 
-export const COURSE_COLORS = ['#2f5be8', '#0f7f6c', '#6d3fc0', '#b4530f', '#a3306b', '#1d8348', '#1f4e8c', '#0f1b33']
+export const COURSE_COLORS = [
+  '#2f5be8', // Blue
+  '#eab308', // Yellow
+  '#0f7f6c', // Teal
+  '#6d3fc0', // Purple
+  '#f08a24', // Orange
+  '#a3306b', // Rose
+  '#1d8348', // Green
+  '#0284c7', // Sky
+  '#1f4e8c', // Deep Blue
+  '#0f1b33', // Navy
+]
 
 /** A course as the screens use it: the course row (or a virtual one) plus its ordered lessons. */
 export interface CourseVM {

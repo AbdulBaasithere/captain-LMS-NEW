@@ -2,7 +2,7 @@
 // Once your Supabase project is live, regenerate this file with the real thing:
 //   npx supabase gen types typescript --project-id <your-project-ref> > src/lib/database.types.ts
 
-export type Role = 'employee' | 'admin' | 'manager'
+export type Role = 'employee' | 'hr' | 'admin' | 'manager'
 
 export interface Profile {
   id: string
@@ -118,7 +118,14 @@ export interface ActivityLogEntry {
 export interface Department {
   id: number
   name: string
+  color?: string | null
   created_at: string
+}
+
+export interface AudienceColorRow {
+  audience_name: string
+  color: string
+  updated_at: string
 }
 
 export type EnrolmentStatus = 'not_started' | 'in_progress' | 'completed' | 'overdue'
@@ -213,6 +220,32 @@ export interface CertificateSettingsRow {
   updated_at: string
 }
 
+export interface TrainingKpiTarget {
+  id: number
+  scope: string
+  target_completion_pct: number
+  target_pass_rate_pct: number
+  target_compliance_pct: number
+  target_learning_hours_monthly: number
+  pass_threshold_pct: number
+  updated_by: string | null
+  updated_at: string
+}
+
+export type KpiReportScope = 'company' | 'department' | 'course' | 'employee'
+export type KpiReportFormat = 'csv' | 'pdf'
+
+export interface KpiReportExport {
+  id: number
+  exported_by: string
+  exporter_role: string
+  report_scope: KpiReportScope
+  format: KpiReportFormat
+  filters: Record<string, unknown>
+  row_count: number
+  created_at: string
+}
+
 // Minimal shape Supabase's client generic needs — table name -> Row type.
 export interface Database {
   public: {
@@ -251,6 +284,11 @@ export interface Database {
         Update: Partial<ActivityLogEntry>
       }
       departments: { Row: Department; Insert: Partial<Department>; Update: Partial<Department> }
+      audience_colors: {
+        Row: AudienceColorRow
+        Insert: Partial<AudienceColorRow>
+        Update: Partial<AudienceColorRow>
+      }
       courses: { Row: Course; Insert: Partial<Course>; Update: Partial<Course> }
       course_enrolments: {
         Row: CourseEnrolment
@@ -276,6 +314,16 @@ export interface Database {
         Row: CertificateSettingsRow
         Insert: Partial<CertificateSettingsRow>
         Update: Partial<CertificateSettingsRow>
+      }
+      training_kpi_targets: {
+        Row: TrainingKpiTarget
+        Insert: Partial<TrainingKpiTarget>
+        Update: Partial<TrainingKpiTarget>
+      }
+      kpi_report_exports: {
+        Row: KpiReportExport
+        Insert: Partial<KpiReportExport>
+        Update: Partial<KpiReportExport>
       }
     }
   }

@@ -165,6 +165,24 @@ const router = createRouter({
         },
       ],
     },
+    {
+      path: '/hr',
+      component: () => import('@/components/layout/HrLayout.vue'),
+      meta: { role: 'hr' },
+      children: [
+        { path: '', redirect: '/hr/overview' },
+        {
+          path: 'overview',
+          name: 'hr-overview',
+          component: () => import('@/views/hr/OverviewView.vue'),
+        },
+        {
+          path: 'compliance',
+          name: 'hr-compliance',
+          component: () => import('@/views/hr/ComplianceView.vue'),
+        },
+      ],
+    },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
@@ -201,6 +219,7 @@ router.beforeEach(async (to) => {
     // Signed in, but this route belongs to a different role — send them home for their own role.
     if (auth.role === 'admin') return '/admin'
     if (auth.role === 'manager') return '/manager'
+    if (auth.role === 'hr') return '/hr'
     return '/app'
   }
   // A page whose widget an admin has hidden is no longer reachable, even by typing its address.
@@ -208,7 +227,9 @@ router.beforeEach(async (to) => {
   if (widgetId) {
     const widgets = useWidgetsStore()
     if (!widgets.loaded) await widgets.load()
-    if (!widgets.isVisible(widgetId)) return auth.role === 'manager' ? '/manager' : auth.role === 'admin' ? '/admin' : '/app'
+    if (!widgets.isVisible(widgetId)) {
+      return auth.role === 'manager' ? '/manager' : auth.role === 'admin' ? '/admin' : auth.role === 'hr' ? '/hr' : '/app'
+    }
   }
   return true
 })

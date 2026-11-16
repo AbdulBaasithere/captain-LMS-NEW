@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import { logActivity } from '@/lib/activity'
-import { loadDepartments } from '@/lib/departments'
+import { loadAudienceColorMap, loadDepartments } from '@/lib/departments'
 import { COURSE_COLORS, COURSE_DIFFICULTIES, resolveCourseDifficulty, sortedLessons } from '@/lib/courses'
 import { materialType, formatDuration, hydrateModulesUploadedVideos } from '@/lib/materials'
 import type { Course, CourseDifficulty, Module } from '@/lib/database.types'
@@ -18,17 +18,21 @@ const course = ref<Course | null>(null)
 const lessons = ref<Module[]>([])
 const available = ref<Module[]>([])
 const categories = ref<string[]>(['General'])
+const audienceColors = ref<Record<string, string>>({})
 const loading = ref(true)
 
 const title = ref('')
 const category = ref('General')
 const difficulty = ref<CourseDifficulty>('Beginner')
 const description = ref('')
-const color = ref(COURSE_COLORS[0]!)
 const published = ref(true)
 const saving = ref(false)
 const saved = ref(false)
 const addId = ref<number | ''>('')
+
+const assignedColor = computed(
+  () => audienceColors.value[category.value] ?? course.value?.color ?? COURSE_COLORS[0]!,
+)
 
 async function load() {
   const [{ data: c }, { data: mods }, depts] = await Promise.all([
@@ -40,13 +44,13 @@ async function load() {
   const all = await hydrateModulesUploadedVideos((mods ?? []) as Module[])
   lessons.value = sortedLessons(all.filter((m) => m.course_id === courseId))
   available.value = all.filter((m) => m.course_id !== courseId)
+  audienceColors.value = await loadAudienceColorMap(depts)
   categories.value = ['General', ...depts.map((d) => d.name)]
   if (course.value) {
     title.value = course.value.title
     category.value = course.value.category
     difficulty.value = resolveCourseDifficulty(course.value.difficulty, course.value.title, course.value.description, lessons.value)
     description.value = course.value.description ?? ''
-    color.value = course.value.color
     published.value = course.value.is_published
   }
   loading.value = false
@@ -58,6 +62,7 @@ async function saveDetails() {
   if (!title.value.trim()) return
   saving.value = true
   saved.value = false
+  const nextColor = assignedColor.value
   const { error } = await supabase
     .from('courses')
     .update({
@@ -65,7 +70,7 @@ async function saveDetails() {
       category: category.value,
       difficulty: difficulty.value,
       description: description.value.trim() || null,
-      color: color.value,
+      color: nextColor,
       is_published: published.value,
     })
     .eq('id', courseId)
@@ -76,7 +81,7 @@ async function saveDetails() {
         title: title.value.trim(),
         category: category.value,
         description: description.value.trim() || null,
-        color: color.value,
+        color: nextColor,
         is_published: published.value,
       })
       .eq('id', courseId)
@@ -141,10 +146,19 @@ async function deleteCourse() {
         <div class="panel-title" style="padding: 0 0 8px"><h3>Details</h3></div>
         <div class="field"><label>Title</label><input v-model="title" type="text" /></div>
         <div class="field">
-          <label>Category</label>
+          <label>Audience / Category</label>
           <select v-model="category">
             <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
           </select>
+          <div class="audience-color-info">
+            <span class="aud-dot" :style="{ background: assignedColor }" aria-hidden="true" />
+            <span>
+              Colour automatically assigned from <b>{{ category }}</b> audience
+            </span>
+            <RouterLink to="/admin/audiences" class="aud-settings-link">
+              Change in Audiences &rarr;
+            </RouterLink>
+          </div>
         </div>
         <div class="field">
           <label>Difficulty level</label>
@@ -153,12 +167,6 @@ async function deleteCourse() {
           </select>
         </div>
         <div class="field"><label>Description (optional)</label><textarea v-model="description" rows="3" /></div>
-        <div class="field">
-          <label>Colour</label>
-          <div class="row wrap" style="gap: 8px">
-            <button v-for="c in COURSE_COLORS" :key="c" class="swatch" :class="{ on: color === c }" :style="{ background: c }" :aria-label="c" @click="color = c" />
-          </div>
-        </div>
         <label class="row" style="gap: 8px; font-weight: 400"><input v-model="published" type="checkbox" style="width: auto" /> Published (visible in the catalog)</label>
         <div class="row" style="margin-top: 12px">
           <button class="btn btn-primary btn-sm" :disabled="saving" @click="saveDetails">{{ saving ? 'Saving…' : 'Save details' }}</button>
@@ -205,15 +213,30 @@ async function deleteCourse() {
     grid-template-columns: 1fr;
   }
 }
-.swatch {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 3px solid transparent;
-  cursor: pointer;
+.audience-color-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
 }
-.swatch.on {
-  border-color: var(--ink);
+.aud-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  flex: none;
+  border: 1px solid rgba(15, 26, 46, 0.16);
+}
+.aud-settings-link {
+  margin-left: auto;
+  color: var(--blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+.aud-settings-link:hover {
+  text-decoration: underline;
 }
 .lesson-row {
   display: flex;

@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import { logActivity } from '@/lib/activity'
-import { loadDepartments } from '@/lib/departments'
+import { loadAudienceColorMap, loadDepartments } from '@/lib/departments'
 import { COURSE_COLORS, COURSE_DIFFICULTIES, courseCode, resolveCourseDifficulty } from '@/lib/courses'
 import { useSort } from '@/composables/useSort'
 import type { Course, CourseDifficulty, Module } from '@/lib/database.types'
@@ -19,10 +19,12 @@ const loading = ref(true)
 const title = ref('')
 const category = ref('General')
 const difficulty = ref<CourseDifficulty>('Beginner')
-const color = ref(COURSE_COLORS[0]!)
+const audienceColors = ref<Record<string, string>>({})
 const categories = ref<string[]>(['General'])
 const saving = ref(false)
 const error = ref('')
+
+const assignedColor = computed(() => audienceColors.value[category.value] ?? COURSE_COLORS[0]!)
 
 async function load() {
   const [{ data, error: err }, { data: mods }, depts] = await Promise.all([
@@ -30,6 +32,7 @@ async function load() {
     supabase.from('modules').select('id, course_id'),
     loadDepartments(),
   ])
+  audienceColors.value = await loadAudienceColorMap(depts)
   categories.value = ['General', ...depts.map((d) => d.name)]
   if (err) {
     missingTable.value = true
@@ -59,13 +62,13 @@ async function createCourse() {
   error.value = ''
   let { data, error: err } = await supabase
     .from('courses')
-    .insert({ title: title.value.trim(), category: category.value, difficulty: difficulty.value, color: color.value })
+    .insert({ title: title.value.trim(), category: category.value, difficulty: difficulty.value, color: assignedColor.value })
     .select()
     .single()
   if (err && err.message.toLowerCase().includes('difficulty')) {
     const fallback = await supabase
       .from('courses')
-      .insert({ title: title.value.trim(), category: category.value, color: color.value })
+      .insert({ title: title.value.trim(), category: category.value, color: assignedColor.value })
       .select()
       .single()
     data = fallback.data
@@ -121,30 +124,25 @@ async function deleteCourse(c: Course) {
         <div class="panel-title" style="padding: 0 0 8px"><h3>New course</h3></div>
         <div class="field"><label>Course title</label><input v-model="title" type="text" placeholder="e.g. Odoo Sales Order Flow" /></div>
         <div class="field">
-          <label>Category</label>
+          <label>Audience / Category</label>
           <select v-model="category">
             <option v-for="c in categories" :key="c" :value="c">{{ c }}</option>
           </select>
+          <div class="audience-color-info">
+            <span class="aud-dot" :style="{ background: assignedColor }" aria-hidden="true" />
+            <span>
+              Colour automatically assigned from <b>{{ category }}</b> audience
+            </span>
+            <RouterLink to="/admin/audiences" class="aud-settings-link">
+              Change in Audiences &rarr;
+            </RouterLink>
+          </div>
         </div>
         <div class="field">
           <label>Difficulty level</label>
           <select v-model="difficulty">
             <option v-for="d in COURSE_DIFFICULTIES" :key="d" :value="d">{{ d }}</option>
           </select>
-        </div>
-        <div class="field">
-          <label>Colour</label>
-          <div class="row wrap" style="gap: 8px">
-            <button
-              v-for="c in COURSE_COLORS"
-              :key="c"
-              class="swatch"
-              :class="{ on: color === c }"
-              :style="{ background: c }"
-              :aria-label="c"
-              @click="color = c"
-            />
-          </div>
         </div>
         <button class="btn btn-primary btn-sm" :disabled="saving || !title.trim()" @click="createCourse">{{ saving ? 'Creating…' : 'Create course' }}</button>
         <p v-if="error" class="hint" style="color: var(--danger)">{{ error }}</p>
@@ -189,14 +187,29 @@ async function deleteCourse(c: Course) {
 </template>
 
 <style scoped>
-.swatch {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: 3px solid transparent;
-  cursor: pointer;
+.audience-color-info {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: var(--ink-soft);
 }
-.swatch.on {
-  border-color: var(--ink);
+.aud-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 4px;
+  flex: none;
+  border: 1px solid rgba(15, 26, 46, 0.16);
+}
+.aud-settings-link {
+  margin-left: auto;
+  color: var(--blue);
+  font-weight: 600;
+  text-decoration: none;
+}
+.aud-settings-link:hover {
+  text-decoration: underline;
 }
 </style>

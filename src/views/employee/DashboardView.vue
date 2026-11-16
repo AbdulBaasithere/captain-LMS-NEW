@@ -2,17 +2,21 @@
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
+import { useWidgetsStore } from '@/stores/widgets'
 import { loadTrackData, pendingMilestones, milestoneLabel, type Milestone } from '@/lib/quiz'
 import { loadCourses, courseProgress, courseCode, type CourseVM, type CourseProgress } from '@/lib/courses'
 import { hasAnyVideo } from '@/lib/materials'
 import { loadStudyLog, streakFromDays, isoDay, relativeTime } from '@/lib/learning'
 import DashWidget from '@/components/DashWidget.vue'
+import KpiDashboardWorkspace from '@/components/kpi/KpiDashboardWorkspace.vue'
 import PracticeQuiz from '@/components/PracticeQuiz.vue'
 import CertificateModal from '@/components/CertificateModal.vue'
 import { buildCertificateData, type CertificateData } from '@/lib/certificate'
 import type { Module, VideoCompletion, QuizAttempt, Announcement } from '@/lib/database.types'
 
 const auth = useAuthStore()
+const widgets = useWidgetsStore()
+const dashboardTab = ref<'overview' | 'kpis'>('overview')
 const track = ref<Module[]>([])
 const completions = ref<VideoCompletion[]>([])
 const attempts = ref<QuizAttempt[]>([])
@@ -170,10 +174,26 @@ const greeting = (() => {
         <p>{{ today }}</p>
         <h2>{{ greeting }}, {{ auth.profile?.full_name?.split(' ')[0] }}</h2>
       </div>
+      <div v-if="widgets.isVisible('emp.kpis')" class="seg">
+        <button :class="{ on: dashboardTab === 'overview' }" @click="dashboardTab = 'overview'">
+          Overview
+        </button>
+        <button :class="{ on: dashboardTab === 'kpis' }" @click="dashboardTab = 'kpis'">
+          My KPIs &amp; Transcript
+        </button>
+      </div>
     </div>
 
-    <div v-if="loading" style="color: var(--ink-soft)">Loading…</div>
+    <KpiDashboardWorkspace
+      v-if="dashboardTab === 'kpis' && widgets.isVisible('emp.kpis')"
+      role="employee"
+      title="Personal Learning KPIs &amp; Transcript"
+      subtitle="Individual completion, quiz scores, monthly study hours, and exportable report"
+    />
+
     <template v-else>
+      <div v-if="loading" style="color: var(--ink-soft)">Loading…</div>
+      <template v-else>
       <div v-if="showAnnouncement" class="card banner" style="border-left: 3px solid var(--brass)">
         <div style="font-size: 13.5px">📣 {{ announcement?.text }}</div>
         <button class="btn btn-ghost btn-sm" @click="dismissAnnouncement">Dismiss</button>
@@ -304,6 +324,7 @@ const greeting = (() => {
           </DashWidget>
         </div>
       </div>
+    </template>
     </template>
 
     <PracticeQuiz v-if="quizCourse" :course-title="quizCourse.title" :lesson-ids="quizCourse.lessons.map((l) => l.id)" @close="quizCourse = null" />

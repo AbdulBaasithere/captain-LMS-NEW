@@ -175,6 +175,7 @@ async function runImport() {
         <label>Role</label>
         <select v-model="newRole">
           <option value="employee">Employee</option>
+          <option value="hr">HR (company-wide KPI &amp; compliance insights, read-only)</option>
           <option value="manager">Manager (sees their department's team, read-only)</option>
           <option value="admin">Admin (full control)</option>
         </select>

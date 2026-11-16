@@ -18,9 +18,11 @@ import {
 } from '@/lib/analytics'
 import DashWidget from '@/components/DashWidget.vue'
 import FunnelCard from '@/components/FunnelCard.vue'
+import KpiDashboardWorkspace from '@/components/kpi/KpiDashboardWorkspace.vue'
 import type { ActivityLogEntry } from '@/lib/database.types'
 
 const auth = useAuthStore()
+const viewMode = ref<'kpi' | 'operations'>('kpi')
 const data = ref<AnalyticsData | null>(null)
 const loading = ref(true)
 const activity = ref<ActivityLogEntry[]>([])
@@ -132,16 +134,29 @@ async function previewDigest() {
   <div>
     <div class="topline">
       <div>
-        <p>Admin · company overview</p>
-        <h2>Analytics</h2>
+        <p>Admin · Company Overview</p>
+        <h2>Analytics &amp; KPI Dashboard</h2>
       </div>
-      <RouterLink class="btn btn-ghost btn-sm" to="/admin/monitoring">
-        🔔 Monitoring &amp; Email Alerts &rarr;
-      </RouterLink>
+      <div class="row wrap" style="gap: 10px; align-items: center">
+        <div class="seg">
+          <button :class="{ on: viewMode === 'kpi' }" @click="viewMode = 'kpi'">
+            KPI Dashboard &amp; Exports
+          </button>
+          <button :class="{ on: viewMode === 'operations' }" @click="viewMode = 'operations'">
+            Operations, Heatmap &amp; Tools
+          </button>
+        </div>
+        <RouterLink class="btn btn-ghost btn-sm" to="/admin/monitoring">
+          🔔 Monitoring &amp; Alerts &rarr;
+        </RouterLink>
+      </div>
     </div>
 
-    <p v-if="loading" class="sub">Loading…</p>
-    <template v-else-if="data">
+    <KpiDashboardWorkspace v-if="viewMode === 'kpi'" role="admin" />
+
+    <template v-else>
+      <p v-if="loading" class="sub">Loading…</p>
+      <template v-else-if="data">
       <DashWidget v-if="stats" id="adm.stats">
         <div class="stats">
           <div class="card stat"><div class="lbl">Active learners</div><div class="val">{{ stats.learners }}</div><div class="sub">employees with an active account</div></div>
@@ -260,16 +275,17 @@ async function previewDigest() {
       </div>
     </div>
 
-    <div class="card" style="margin-top: 16px">
-      <div class="panel-title"><h3>Recent admin activity</h3></div>
-      <div v-for="a in activity" :key="a.id" class="row-item" style="cursor: default">
-        <div class="row-info">
-          <div class="t">{{ a.text }}</div>
-          <div class="m">{{ new Date(a.created_at).toLocaleString() }}</div>
+      <div class="card" style="margin-top: 16px">
+        <div class="panel-title"><h3>Recent admin activity</h3></div>
+        <div v-for="a in activity" :key="a.id" class="row-item" style="cursor: default">
+          <div class="row-info">
+            <div class="t">{{ a.text }}</div>
+            <div class="m">{{ new Date(a.created_at).toLocaleString() }}</div>
+          </div>
         </div>
+        <p v-if="!activity.length" style="padding: 24px; text-align: center; color: var(--ink-soft)">No activity yet.</p>
       </div>
-      <p v-if="!activity.length" style="padding: 24px; text-align: center; color: var(--ink-soft)">No activity yet.</p>
-    </div>
+    </template>
   </div>
 </template>
 

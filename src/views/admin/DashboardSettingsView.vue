@@ -49,7 +49,7 @@ async function reset() {
   <div>
     <div class="topline">
       <div>
-        <h2>Dashboard settings</h2>
+        <h2>Dashboard Settings</h2>
         <p>Choose which widgets each role sees. Admin only.</p>
       </div>
     </div>

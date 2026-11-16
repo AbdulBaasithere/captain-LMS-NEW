@@ -25,7 +25,7 @@ const links = [
   { to: '/admin/modules', label: 'Modules (lessons)', short: 'Lessons', icon: '▤' },
   { to: '/admin/audiences', label: 'Audiences', short: 'Audiences', icon: '🏷️' },
   { to: '/admin/certificates', label: 'Certificate Template', short: 'Certs', icon: '📜' },
-  { to: '/admin/dashboard-settings', label: 'Dashboard settings', short: 'Widgets', icon: '⚙' },
+  { to: '/admin/dashboard-settings', label: 'Settings', short: 'Settings', icon: '⚙' },
   { to: '/admin/release-notes', label: 'Release notes', short: 'Releases', icon: '📝' },
 ]
 </script>

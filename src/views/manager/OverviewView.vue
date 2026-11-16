@@ -6,8 +6,10 @@ import { relativeTime } from '@/lib/learning'
 import { initialsOf as nameInitials } from '@/lib/employees'
 import { useSort } from '@/composables/useSort'
 import DashWidget from '@/components/DashWidget.vue'
+import KpiDashboardWorkspace from '@/components/kpi/KpiDashboardWorkspace.vue'
 
 const auth = useAuthStore()
+const viewMode = ref<'kpi' | 'roster'>('kpi')
 const data = ref<AnalyticsData | null>(null)
 const loading = ref(true)
 const filter = ref<'All' | PersonStatus>('All')
@@ -62,12 +64,23 @@ const filters: ('All' | PersonStatus)[] = ['All', 'On track', 'At risk', 'Overdu
     <div class="topline">
       <div>
         <p>Manager · {{ auth.profile?.department }} team</p>
-        <h2>Team progress</h2>
+        <h2>Team progress &amp; KPIs</h2>
+      </div>
+      <div class="seg">
+        <button :class="{ on: viewMode === 'kpi' }" @click="viewMode = 'kpi'">
+          Team KPIs &amp; Exports
+        </button>
+        <button :class="{ on: viewMode === 'roster' }" @click="viewMode = 'roster'">
+          Quick Roster
+        </button>
       </div>
     </div>
 
-    <p v-if="loading" class="sub">Loading…</p>
+    <KpiDashboardWorkspace v-if="viewMode === 'kpi'" role="manager" />
+
     <template v-else>
+      <p v-if="loading" class="sub">Loading…</p>
+      <template v-else>
       <DashWidget id="mgr.stats">
         <div class="stats">
           <div class="card stat"><div class="lbl">Team size</div><div class="val">{{ stats.size }}</div><div class="sub">in your department</div></div>
@@ -106,6 +119,7 @@ const filters: ('All' | PersonStatus)[] = ['All', 'On track', 'At risk', 'Overdu
           <p v-if="!sorted.length" style="padding: 24px; text-align: center; color: var(--ink-soft)">No one matches this filter.</p>
         </div>
       </DashWidget>
+      </template>
     </template>
   </div>
 </template>
