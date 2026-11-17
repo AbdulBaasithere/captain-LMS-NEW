@@ -4,7 +4,8 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import { useWidgetsStore } from '@/stores/widgets'
 import { loadTrackData, pendingMilestones, milestoneLabel, type Milestone } from '@/lib/quiz'
-import { loadCourses, courseProgress, courseCode, type CourseVM, type CourseProgress } from '@/lib/courses'
+import { courseProgress, courseCode, type CourseVM, type CourseProgress } from '@/lib/courses'
+import { loadEmployeeCoursesAndEnrolments } from '@/lib/courseAssignments'
 import { hasAnyVideo } from '@/lib/materials'
 import { loadStudyLog, streakFromDays, isoDay, relativeTime } from '@/lib/learning'
 import DashWidget from '@/components/DashWidget.vue'
@@ -12,7 +13,7 @@ import KpiDashboardWorkspace from '@/components/kpi/KpiDashboardWorkspace.vue'
 import PracticeQuiz from '@/components/PracticeQuiz.vue'
 import CertificateModal from '@/components/CertificateModal.vue'
 import { buildCertificateData, type CertificateData } from '@/lib/certificate'
-import type { Module, VideoCompletion, QuizAttempt, Announcement } from '@/lib/database.types'
+import type { Module, VideoCompletion, QuizAttempt, Announcement, CourseEnrolment } from '@/lib/database.types'
 
 const auth = useAuthStore()
 const widgets = useWidgetsStore()
@@ -21,6 +22,7 @@ const track = ref<Module[]>([])
 const completions = ref<VideoCompletion[]>([])
 const attempts = ref<QuizAttempt[]>([])
 const courses = ref<CourseVM[]>([])
+const enrolmentByCourseId = ref<Map<number, CourseEnrolment>>(new Map())
 const studyDays = ref<Set<string>>(new Set())
 const loading = ref(true)
 const nextQuiz = ref<Milestone | null>(null)
@@ -40,15 +42,17 @@ onMounted(async () => {
   const userId = auth.profile?.id
   if (!dept || !userId) return
 
-  const [{ track: t, completions: comp, attempts: att, grants }, { data: latestAnnouncement }, study] = await Promise.all([
+  const [{ track: t, completions: comp, attempts: att, grants }, assignedData, { data: latestAnnouncement }, study] = await Promise.all([
     loadTrackData(userId, dept),
+    loadEmployeeCoursesAndEnrolments(userId, dept),
     supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     loadStudyLog(userId),
   ])
   track.value = t
   completions.value = comp
   attempts.value = att
-  courses.value = (await loadCourses(t)).filter((c) => c.lessons.length > 0)
+  courses.value = assignedData.courses
+  enrolmentByCourseId.value = assignedData.enrolmentByCourseId
   nextQuiz.value = pendingMilestones(t, comp, att, grants)[0] ?? null
   announcement.value = latestAnnouncement
 
@@ -275,7 +279,15 @@ const greeting = (() => {
                   <span class="row"><b>{{ x.course.title }}</b><b class="sp">{{ x.p.pct }}%</b></span>
                   <span class="row" style="margin-top: 4px"><span class="bar"><i :style="{ width: x.p.pct + '%', background: x.p.status === 'completed' ? '#10b981' : x.course.color }" /></span></span>
                   <span class="row wrap" style="display: flex; justify-content: space-between; align-items: center; margin-top: 4px">
-                    <span class="sub">{{ x.course.category }} · {{ x.p.done }} of {{ x.p.total }} completed</span>
+                    <span class="sub">
+                      {{ x.course.category }} · {{ x.p.done }} of {{ x.p.total }} completed
+                      <template v-if="x.course.dbId && enrolmentByCourseId.get(x.course.dbId)?.assigned_by">
+                        · <b style="color: var(--blue)">Assigned</b>
+                      </template>
+                      <template v-if="x.course.dbId && enrolmentByCourseId.get(x.course.dbId)?.deadline_date">
+                        · Due {{ enrolmentByCourseId.get(x.course.dbId)?.deadline_date }}
+                      </template>
+                    </span>
                     <button
                       v-if="x.p.status === 'completed'"
                       class="cert-row-btn"

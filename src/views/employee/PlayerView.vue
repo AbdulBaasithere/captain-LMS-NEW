@@ -7,7 +7,8 @@ import { loadTrackData, reachedMilestones, hasPassed, milestoneLabel } from '@/l
 import { notifyQuizUnlocked } from '@/lib/notifications'
 import { loadYouTubeIframeApi, type YTPlayer } from '@/lib/youtube'
 import { documentEmbedUrl, hasAnyVideo, hydrateModuleUploadedVideo } from '@/lib/materials'
-import { loadCourses, courseProgress, type CourseVM } from '@/lib/courses'
+import { courseProgress, type CourseVM } from '@/lib/courses'
+import { loadEmployeeCoursesAndEnrolments } from '@/lib/courseAssignments'
 import PracticeQuiz from '@/components/PracticeQuiz.vue'
 import CertificateModal from '@/components/CertificateModal.vue'
 import { buildCertificateData, type CertificateData } from '@/lib/certificate'
@@ -155,13 +156,12 @@ async function loadCourseContext() {
   const dept = auth.profile?.department
   const userId = auth.profile?.id
   if (!dept || !userId || !module_.value) return
-  const [{ data: mods }, { data: comps }] = await Promise.all([
-    supabase.from('modules').select('*').or(`department.eq.General,department.eq.${dept}`).order('id'),
+  const [assignedData, { data: comps }] = await Promise.all([
+    loadEmployeeCoursesAndEnrolments(userId, dept),
     supabase.from('video_completions').select('*').eq('user_id', userId),
   ])
   courseCompletions.value = (comps ?? []) as VideoCompletion[]
-  const all = await loadCourses((mods ?? []) as Module[])
-  course.value = all.find((c) => c.lessons.some((l) => l.id === module_.value!.id)) ?? null
+  course.value = assignedData.courses.find((c) => c.lessons.some((l) => l.id === module_.value!.id)) ?? null
 
   const activeCourseId = course.value?.dbId ?? module_.value.course_id ?? null
   void recordLearningActivity({

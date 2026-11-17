@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute } from 'vue-router'
+import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
+import { logActivity } from '@/lib/activity'
+import { isActive, initialsOf } from '@/lib/employees'
+import { loadDepartments } from '@/lib/departments'
 import {
   getCertificateConfig,
   mergeCertificateConfig,
@@ -21,11 +26,22 @@ import {
   encodePdfBytesToBase64,
   inspectPdfTemplate,
 } from '@/lib/pdfTemplateStamp'
+import {
+  loadIssuedCertificates,
+  issueCertificateToEmployees,
+  revokeIssuedCertificate,
+  issuedCertToCertificateData,
+  type IssuedCertificate,
+} from '@/lib/issuedCertificates'
 import CertificatePdfAligner from '@/components/CertificatePdfAligner.vue'
+import CertificateModal from '@/components/CertificateModal.vue'
+import type { Course, Profile } from '@/lib/database.types'
 
 const MAX_PDF_BYTES = 3 * 1024 * 1024 // 3 MB limit for reliable JSONB + fallback persistence
 
+const route = useRoute()
 const auth = useAuthStore()
+const activeTab = ref<'issue' | 'template'>(route.query.tab === 'template' ? 'template' : 'issue')
 const form = reactive<CertificateCustomization>(getCertificateConfig())
 
 const loadingRemote = ref(true)
@@ -155,9 +171,191 @@ async function inspectExistingPdf() {
   }
 }
 
+// ---- Admin-created & issued certificates state ----
+const issuedList = ref<IssuedCertificate[]>([])
+const issuedTableMissing = ref(false)
+const loadingIssued = ref(true)
+const profiles = ref<Profile[]>([])
+const coursesList = ref<Course[]>([])
+const departments = ref<string[]>(['All'])
+
+const issueSearch = ref('')
+const issueDeptFilter = ref('All')
+const recipientFilterDept = ref('All')
+const recipientSearch = ref('')
+const selectedRecipientIds = ref<string[]>([])
+const issuing = ref(false)
+const revokingCertId = ref<number | null>(null)
+const issueError = ref('')
+const previewCertData = ref<CertificateData | null>(null)
+
+const issueForm = reactive({
+  title: '',
+  category: 'Special Recognition',
+  description: '',
+  issuedDate: new Date().toISOString().slice(0, 10),
+  totalHours: 2,
+  totalLessons: 1,
+  courseId: '' as string | number,
+})
+
+const activeEmployees = computed(() =>
+  profiles.value.filter((p) => isActive(p) && p.role === 'employee'),
+)
+
+const profilesById = computed(() => {
+  const m = new Map<string, Profile>()
+  for (const p of profiles.value) m.set(p.id, p)
+  return m
+})
+
+const filteredRecipientPool = computed(() => {
+  const q = recipientSearch.value.trim().toLowerCase()
+  return activeEmployees.value.filter((p) => {
+    if (recipientFilterDept.value !== 'All' && p.department !== recipientFilterDept.value) return false
+    if (q) {
+      return p.full_name.toLowerCase().includes(q) || p.department.toLowerCase().includes(q)
+    }
+    return true
+  })
+})
+
+const filteredIssuedList = computed(() => {
+  const q = issueSearch.value.trim().toLowerCase()
+  return issuedList.value.filter((c) => {
+    const rec = profilesById.value.get(c.userId)
+    if (issueDeptFilter.value !== 'All' && rec?.department !== issueDeptFilter.value) return false
+    if (q) {
+      const matchTitle = c.title.toLowerCase().includes(q)
+      const matchCode = c.certificateCode.toLowerCase().includes(q)
+      const matchName = rec?.full_name.toLowerCase().includes(q) ?? false
+      if (!matchTitle && !matchCode && !matchName) return false
+    }
+    return true
+  })
+})
+
+function onCourseLinkChange() {
+  if (!issueForm.courseId) return
+  const c = coursesList.value.find((item) => item.id === Number(issueForm.courseId))
+  if (c) {
+    if (!issueForm.title.trim()) issueForm.title = c.title
+    issueForm.category = c.category
+  }
+}
+
+function toggleRecipient(uid: string) {
+  if (selectedRecipientIds.value.includes(uid)) {
+    selectedRecipientIds.value = selectedRecipientIds.value.filter((id) => id !== uid)
+  } else {
+    selectedRecipientIds.value = [...selectedRecipientIds.value, uid]
+  }
+}
+
+function selectAllVisibleRecipients() {
+  const visibleIds = filteredRecipientPool.value.map((p) => p.id)
+  const merged = new Set([...selectedRecipientIds.value, ...visibleIds])
+  selectedRecipientIds.value = [...merged]
+}
+
+function clearSelectedRecipients() {
+  selectedRecipientIds.value = []
+}
+
+async function loadIssuedData() {
+  loadingIssued.value = true
+  const [certRes, { data: profData }, { data: courseData }, depts] = await Promise.all([
+    loadIssuedCertificates(),
+    supabase.from('profiles').select('*').order('full_name'),
+    supabase.from('courses').select('*').order('title'),
+    loadDepartments(),
+  ])
+  issuedList.value = certRes.certificates
+  issuedTableMissing.value = certRes.tableMissing
+  profiles.value = (profData ?? []) as Profile[]
+  coursesList.value = (courseData ?? []) as Course[]
+  departments.value = ['All', 'General', ...depts.map((d) => d.name)]
+  loadingIssued.value = false
+}
+
+async function submitIssueCertificate() {
+  issueError.value = ''
+  if (!issueForm.title.trim()) {
+    issueError.value = 'Enter a certificate title.'
+    return
+  }
+  if (selectedRecipientIds.value.length === 0) {
+    issueError.value = 'Select at least one employee to receive this certificate.'
+    return
+  }
+
+  issuing.value = true
+  const result = await issueCertificateToEmployees(
+    {
+      title: issueForm.title,
+      category: issueForm.category,
+      description: issueForm.description,
+      issuedDate: issueForm.issuedDate,
+      totalHours: issueForm.totalHours,
+      totalLessons: issueForm.totalLessons,
+      courseId: issueForm.courseId ? Number(issueForm.courseId) : null,
+    },
+    selectedRecipientIds.value,
+    auth.profile?.id,
+  )
+  issuing.value = false
+
+  if (!result.ok) {
+    issueError.value = result.error ?? 'Could not create certificate.'
+    return
+  }
+
+  await logActivity(
+    auth.profile?.id,
+    `Issued certificate "${issueForm.title.trim()}" to ${result.issued.length} employee(s)`,
+  )
+
+  showToast(
+    result.error ?? `Certificate "${issueForm.title.trim()}" issued to ${result.issued.length} employee(s)!`,
+    result.syncedRemote ? 'success' : 'warn',
+  )
+  issueForm.title = ''
+  issueForm.description = ''
+  issueForm.courseId = ''
+  selectedRecipientIds.value = []
+  await loadIssuedData()
+}
+
+function openIssuedPreview(cert: IssuedCertificate) {
+  const rec = profilesById.value.get(cert.userId)
+  previewCertData.value = issuedCertToCertificateData(cert, {
+    full_name: rec?.full_name ?? 'Employee',
+    email: rec?.email,
+    department: rec?.department,
+  })
+}
+
+async function handleRevokeCertificate(cert: IssuedCertificate) {
+  const rec = profilesById.value.get(cert.userId)
+  const label = rec ? `${cert.title} for ${rec.full_name}` : cert.title
+  if (!window.confirm(`Revoke certificate "${label}"?\n\nThis removes the certificate from the employee's credentials.`)) {
+    return
+  }
+  revokingCertId.value = cert.id
+  const res = await revokeIssuedCertificate(cert.id)
+  revokingCertId.value = null
+  if (!res.ok) {
+    showToast(res.error ?? 'Could not revoke certificate.', 'warn')
+    return
+  }
+  await logActivity(auth.profile?.id, `Revoked issued certificate "${label}"`)
+  showToast(`Revoked "${label}".`)
+  await loadIssuedData()
+}
+
 onMounted(async () => {
   try {
-    const synced = await syncCertificateConfigFromServer()
+    const [synced] = await Promise.all([syncCertificateConfigFromServer(), loadIssuedData()])
     assignConfig(synced)
     await inspectExistingPdf()
     await refreshPdfPreview()
@@ -299,13 +497,13 @@ async function downloadSamplePdf() {
   <div class="cert-admin-page">
     <div class="topline">
       <div>
-        <h2>Certificate Template & Details</h2>
+        <h2>Certificates</h2>
         <p>
-          Upload your company's sample PDF certificate template once to use it for all employee certificates across the LMS, and align details live.
+          Create and issue custom certificates directly to employees, or customize your organization's certificate template.
         </p>
       </div>
 
-      <div class="row wrap" style="gap: 8px">
+      <div v-if="activeTab === 'template'" class="row wrap" style="gap: 8px">
         <button class="btn btn-ghost btn-sm" @click="onReset">
           {{ confirmReset ? '⚠️ Click Again to Confirm Reset' : '↺ Reset Defaults' }}
         </button>
@@ -320,12 +518,218 @@ async function downloadSamplePdf() {
       </div>
     </div>
 
+    <div class="seg" style="margin-bottom: 18px">
+      <button :class="{ on: activeTab === 'issue' }" @click="activeTab = 'issue'">
+        📜 Create &amp; Issue Certificates ({{ issuedList.length }})
+      </button>
+      <button :class="{ on: activeTab === 'template' }" @click="activeTab = 'template'">
+        🎨 Template &amp; PDF Settings
+      </button>
+    </div>
+
     <!-- Toast notification -->
     <div v-if="toastMessage" class="save-toast" :class="{ warn: toastKind === 'warn' }">
       <span>{{ toastKind === 'warn' ? '⚠️' : '✓' }}</span>
       <span>{{ toastMessage }}</span>
     </div>
 
+    <!-- TAB 1: Create & Issue Custom Certificates -->
+    <template v-if="activeTab === 'issue'">
+      <div v-if="issuedTableMissing" class="card notice-bar">
+        <strong>Database migration pending:</strong>
+        <span>
+          Run <code>supabase/migrations/20261116_admin_certificates_badges_assignments.sql</code> in Supabase SQL Editor to store
+          admin-issued certificates globally across devices.
+        </span>
+      </div>
+
+      <div class="issue-layout">
+        <!-- Create & Issue Form -->
+        <div class="card issue-form-card">
+          <div style="margin-bottom: 14px">
+            <h3 style="font-size: 17px; margin-bottom: 4px">Create &amp; Issue Certificate</h3>
+            <p class="sub" style="margin: 0">
+              Creates an official verifiable certificate using your active template and delivers it to selected employees.
+            </p>
+          </div>
+
+          <div class="field">
+            <label>Certificate title *</label>
+            <input v-model="issueForm.title" type="text" placeholder="e.g. Leadership Excellence Award" />
+          </div>
+
+          <div class="issue-two-col">
+            <div class="field">
+              <label>Category / Track label</label>
+              <input v-model="issueForm.category" type="text" placeholder="e.g. Special Recognition" />
+            </div>
+            <div class="field">
+              <label>Link to course (optional)</label>
+              <select v-model="issueForm.courseId" @change="onCourseLinkChange">
+                <option value="">Standalone certificate (no linked course)</option>
+                <option v-for="c in coursesList" :key="c.id" :value="c.id">
+                  {{ c.title }} ({{ c.category }})
+                </option>
+              </select>
+            </div>
+          </div>
+
+          <div class="issue-three-col">
+            <div class="field">
+              <label>Issued date</label>
+              <input v-model="issueForm.issuedDate" type="date" />
+            </div>
+            <div class="field">
+              <label>Credit hours</label>
+              <input v-model.number="issueForm.totalHours" type="number" min="0" step="0.5" class="tabular" />
+            </div>
+            <div class="field">
+              <label>Lessons / Modules</label>
+              <input v-model.number="issueForm.totalLessons" type="number" min="0" step="1" class="tabular" />
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Citation / Notes (optional)</label>
+            <input
+              v-model="issueForm.description"
+              type="text"
+              placeholder="Reason for recognition or program summary"
+            />
+          </div>
+
+          <div class="field">
+            <div class="row wrap" style="justify-content: space-between; align-items: center; margin-bottom: 6px">
+              <label style="margin: 0">
+                Select recipients * (<span class="tabular">{{ selectedRecipientIds.length }}</span> selected)
+              </label>
+              <div class="row" style="gap: 8px">
+                <button type="button" class="btn btn-ghost btn-sm" @click="selectAllVisibleRecipients">
+                  Select visible ({{ filteredRecipientPool.length }})
+                </button>
+                <button
+                  v-if="selectedRecipientIds.length"
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  @click="clearSelectedRecipients"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+
+            <div class="picker-filters">
+              <input v-model="recipientSearch" type="search" placeholder="Search employees…" />
+              <select v-model="recipientFilterDept">
+                <option v-for="d in departments" :key="d" :value="d">{{ d }}</option>
+              </select>
+            </div>
+
+            <div class="recipient-list">
+              <label
+                v-for="emp in filteredRecipientPool"
+                :key="emp.id"
+                class="recipient-item"
+                :class="{ selected: selectedRecipientIds.includes(emp.id) }"
+              >
+                <input
+                  type="checkbox"
+                  :checked="selectedRecipientIds.includes(emp.id)"
+                  @change="toggleRecipient(emp.id)"
+                />
+                <div class="avatar-xs">{{ initialsOf(emp.full_name) }}</div>
+                <div class="grow" style="min-width: 0">
+                  <div class="emp-nm">{{ emp.full_name }}</div>
+                  <div class="sub">{{ emp.department }}{{ emp.email ? ` · ${emp.email}` : '' }}</div>
+                </div>
+              </label>
+              <div v-if="!filteredRecipientPool.length" class="sub" style="padding: 14px; text-align: center">
+                No matching active employees.
+              </div>
+            </div>
+          </div>
+
+          <p v-if="issueError" class="hint" style="color: var(--danger); margin-bottom: 10px">{{ issueError }}</p>
+
+          <button class="btn btn-primary btn-sm" :disabled="issuing" @click="submitIssueCertificate">
+            {{
+              issuing
+                ? 'Issuing…'
+                : `Create & Issue Certificate${selectedRecipientIds.length > 1 ? ` (${selectedRecipientIds.length})` : ''}`
+            }}
+          </button>
+        </div>
+
+        <!-- Issued Certificates History -->
+        <div class="card" style="overflow: hidden">
+          <div class="panel-title">
+            <div>
+              <h3>Issued Custom Certificates</h3>
+              <p class="sub" style="margin: 2px 0 0">Preview official PDFs or revoke issued credentials.</p>
+            </div>
+            <div class="row wrap" style="gap: 8px">
+              <input v-model="issueSearch" type="search" placeholder="Search title, employee, ID…" style="width: 210px" />
+              <select v-model="issueDeptFilter" style="width: 150px">
+                <option v-for="d in departments" :key="d" :value="d">{{ d }}</option>
+              </select>
+            </div>
+          </div>
+
+          <div v-if="loadingIssued" class="sub" style="padding: 20px">Loading issued certificates…</div>
+          <div v-else-if="!filteredIssuedList.length" class="sub" style="padding: 28px 18px; text-align: center">
+            No custom certificates issued yet. Use the form to create and award one to employees.
+          </div>
+          <div v-else class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Certificate</th>
+                  <th>Issued</th>
+                  <th>Code</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="cert in filteredIssuedList" :key="cert.id">
+                  <td>
+                    <div style="font-weight: 600">{{ profilesById.get(cert.userId)?.full_name ?? 'Employee' }}</div>
+                    <div class="sub">{{ profilesById.get(cert.userId)?.department ?? '—' }}</div>
+                  </td>
+                  <td>
+                    <div style="font-weight: 600">{{ cert.title }}</div>
+                    <div class="sub">
+                      {{ cert.category }}
+                      <template v-if="cert.totalHours > 0"> · {{ cert.totalHours }}h</template>
+                    </div>
+                  </td>
+                  <td class="tabular">{{ cert.issuedDate }}</td>
+                  <td>
+                    <code class="cert-code">{{ cert.certificateCode }}</code>
+                  </td>
+                  <td>
+                    <div class="row" style="gap: 6px">
+                      <button class="btn btn-ghost btn-sm" @click="openIssuedPreview(cert)">View / PDF</button>
+                      <button
+                        class="btn btn-ghost btn-sm"
+                        style="color: var(--danger)"
+                        :disabled="revokingCertId === cert.id"
+                        @click="handleRevokeCertificate(cert)"
+                      >
+                        {{ revokingCertId === cert.id ? '…' : 'Revoke' }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- TAB 2: Template & PDF Settings (existing customizer preserved intact) -->
+    <template v-else>
     <!-- Primary Company PDF Template Section -->
     <div class="card custom-pdf-card">
       <div class="custom-pdf-header">
@@ -640,6 +1044,13 @@ async function downloadSamplePdf() {
         </div>
       </div>
     </div>
+    </template>
+
+    <CertificateModal
+      v-if="previewCertData"
+      :certificate="previewCertData"
+      @close="previewCertData = null"
+    />
   </div>
 </template>
 
@@ -1019,5 +1430,127 @@ async function downloadSamplePdf() {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+}
+
+.notice-bar {
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: baseline;
+  border-color: var(--brass);
+}
+
+.issue-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 470px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1080px) {
+  .issue-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.issue-form-card {
+  padding: 18px;
+}
+
+.issue-two-col {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.issue-three-col {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .issue-two-col,
+  .issue-three-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+.picker-filters {
+  display: grid;
+  grid-template-columns: 1fr 140px;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.recipient-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-sunken);
+  display: flex;
+  flex-direction: column;
+}
+
+.recipient-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 0.12s ease;
+}
+
+.recipient-item:last-child {
+  border-bottom: none;
+}
+
+.recipient-item.selected {
+  background: rgba(59, 130, 246, 0.1);
+}
+
+.recipient-item input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.avatar-xs {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--brass-soft);
+  color: var(--brass-strong);
+  flex: none;
+}
+
+.emp-nm {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cert-code {
+  font-family: monospace;
+  font-size: 11.5px;
+  padding: 2px 6px;
+  border-radius: 5px;
+  background: var(--surface-sunken);
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
 }
 </style>

@@ -246,6 +246,60 @@ export interface KpiReportExport {
   created_at: string
 }
 
+export interface BadgeCriterionRow {
+  id: number
+  slug: string
+  name: string
+  description: string
+  icon: string
+  tier_order: number
+  match_mode: 'all' | 'any'
+  min_course_duration_minutes: number
+  min_courses_completed: number
+  min_certificates_earned: number
+  is_active: boolean
+  updated_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface IssuedCertificateRow {
+  id: number
+  certificate_code: string
+  user_id: string
+  title: string
+  category: string
+  description: string
+  issued_date: string
+  total_hours: number
+  total_lessons: number
+  course_id: number | null
+  issued_by: string | null
+  created_at: string
+}
+
+export interface CustomBadgeRow {
+  id: number
+  slug: string
+  name: string
+  description: string
+  icon: string
+  category: string
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EmployeeBadgeAwardRow {
+  id: number
+  badge_id: number
+  user_id: string
+  reason: string
+  awarded_by: string | null
+  awarded_at: string
+}
+
 // Minimal shape Supabase's client generic needs — table name -> Row type.
 export interface Database {
   public: {
@@ -324,6 +378,26 @@ export interface Database {
         Row: KpiReportExport
         Insert: Partial<KpiReportExport>
         Update: Partial<KpiReportExport>
+      }
+      badge_criteria: {
+        Row: BadgeCriterionRow
+        Insert: Partial<BadgeCriterionRow>
+        Update: Partial<BadgeCriterionRow>
+      }
+      issued_certificates: {
+        Row: IssuedCertificateRow
+        Insert: Partial<IssuedCertificateRow>
+        Update: Partial<IssuedCertificateRow>
+      }
+      custom_badges: {
+        Row: CustomBadgeRow
+        Insert: Partial<CustomBadgeRow>
+        Update: Partial<CustomBadgeRow>
+      }
+      employee_badge_awards: {
+        Row: EmployeeBadgeAwardRow
+        Insert: Partial<EmployeeBadgeAwardRow>
+        Update: Partial<EmployeeBadgeAwardRow>
       }
     }
   }

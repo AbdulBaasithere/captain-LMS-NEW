@@ -115,6 +115,16 @@ const router = createRouter({
           component: () => import('@/views/admin/CertificateSettingsView.vue'),
         },
         {
+          path: 'badges',
+          name: 'admin-badges',
+          component: () => import('@/views/admin/BadgeCriteriaView.vue'),
+        },
+        {
+          path: 'leaderboard',
+          name: 'admin-leaderboard',
+          component: () => import('@/views/shared/OrganizationLeaderboardView.vue'),
+        },
+        {
           path: 'monitoring',
           name: 'admin-monitoring',
           component: () => import('@/views/admin/MonitoringView.vue'),
@@ -163,6 +173,11 @@ const router = createRouter({
           name: 'manager-team',
           component: () => import('@/views/manager/TeamView.vue'),
         },
+        {
+          path: 'leaderboard',
+          name: 'manager-leaderboard',
+          component: () => import('@/views/shared/OrganizationLeaderboardView.vue'),
+        },
       ],
     },
     {
@@ -180,6 +195,11 @@ const router = createRouter({
           path: 'compliance',
           name: 'hr-compliance',
           component: () => import('@/views/hr/ComplianceView.vue'),
+        },
+        {
+          path: 'leaderboard',
+          name: 'hr-leaderboard',
+          component: () => import('@/views/shared/OrganizationLeaderboardView.vue'),
         },
       ],
     },

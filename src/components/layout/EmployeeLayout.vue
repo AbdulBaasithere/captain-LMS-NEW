@@ -32,7 +32,7 @@ const allLinks = [
   { to: '/app/catalog', label: 'Course catalog', short: 'Courses', icon: '▤' },
   { to: '/app/modules', label: 'My learning', short: 'Learning', icon: '▶', dot: true },
   { to: '/app/badges', label: 'Certificates & badges', short: 'Badges', icon: '🏆', widget: 'emp.certs' },
-  { to: '/app/leaderboard', label: 'Leaderboard', short: 'Board', icon: '🏅', widget: 'emp.leaderboard' },
+  { to: '/app/leaderboard', label: 'Org leaderboard', short: 'Board', icon: '🏅', widget: 'emp.leaderboard' },
   { to: '/app/calendar', label: 'Deadlines', short: 'Dates', icon: '📅', widget: 'emp.calendar' },
   { to: '/app/account', label: 'Account', short: 'Account', icon: '⚙' },
 ]

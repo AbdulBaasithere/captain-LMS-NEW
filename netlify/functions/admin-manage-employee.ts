@@ -9,6 +9,11 @@
 // profiles.is_active = false so reports and leaderboards can hide them. Their history is kept.
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import {
+  createAndSendInviteViaResend,
+  getResendInviteConfig,
+  resolvePublicRedirectUrl,
+} from './_shared/resend-invite'
 
 type Action = 'create' | 'update' | 'deactivate' | 'reactivate' | 'delete' | 'get'
 const ROLES = ['employee', 'hr', 'manager', 'admin']
@@ -64,6 +69,9 @@ export default async (req: Request) => {
   const { action, id } = body
 
   if (action === 'create') {
+    const resendConfig = getResendInviteConfig()
+    if ('error' in resendConfig) return json({ error: resendConfig.error }, 500)
+
     const email = body.email?.trim().toLowerCase()
     const fullName = body.full_name?.trim()
     const role = body.role ?? 'employee'
@@ -72,13 +80,17 @@ export default async (req: Request) => {
     if (!fullName) return json({ error: 'Enter the employee’s name.' }, 400)
     if (!ROLES.includes(role)) return json({ error: 'Invalid role.' }, 400)
 
-    const { data, error } = await db.auth.admin.inviteUserByEmail(email, {
-      data: { full_name: fullName, department, role: 'employee' },
+    const outcome = await createAndSendInviteViaResend({
+      admin: db,
+      resendConfig,
+      email,
+      fullName,
+      department,
+      role,
+      redirectTo: resolvePublicRedirectUrl(req),
     })
-    if (error || !data.user) return json({ error: error?.message ?? 'Could not send the invite.' }, 400)
-    // The role is applied here, server-side, rather than trusted from sign-up metadata.
-    await db.from('profiles').update({ role, full_name: fullName, department }).eq('id', data.user.id)
-    return json({ ok: true, id: data.user.id })
+    if (!outcome.ok) return json({ error: outcome.error }, 400)
+    return json({ ok: true, id: outcome.userId, provider: 'resend', messageId: outcome.messageId })
   }
 
   if (!id) return json({ error: 'id is required' }, 400)

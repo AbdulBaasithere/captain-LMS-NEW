@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import dotenv from 'dotenv'
 import express, { type Request, type Response, type NextFunction } from 'express'
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import JSZip from 'jszip'
 import { GoogleGenAI, Type, type Part } from '@google/genai'
 
@@ -603,9 +603,13 @@ function buildEnvDiagnostics(isProd: boolean, port: number) {
     },
     monitoringAndEmail: {
       emailProvider: (process.env.EMAIL_PROVIDER || '').trim() || null,
+      inviteProvider: (process.env.RESEND_API_KEY || '').trim() && ((process.env.LMS_FROM_EMAIL || '').trim() || (process.env.DIGEST_FROM || '').trim())
+        ? 'resend'
+        : 'unconfigured',
       resendApiKeyPresent: Boolean((process.env.RESEND_API_KEY || '').trim()),
       digestFromPresent: Boolean((process.env.DIGEST_FROM || '').trim()),
       lmsFromEmailPresent: Boolean((process.env.LMS_FROM_EMAIL || '').trim()),
+      inviteFromPresent: Boolean((process.env.LMS_FROM_EMAIL || '').trim() || (process.env.DIGEST_FROM || '').trim()),
       lmsPublicUrl: (process.env.LMS_PUBLIC_URL || '').trim() || null,
       cronSecretPresent: Boolean((process.env.CRON_SECRET || '').trim()),
     },
@@ -708,6 +712,1194 @@ function logEnvironmentDiagnostics(
   )
 }
 
+async function verifyAdminCaller(req: Request, res: Response) {
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim()
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+  if (!supabaseUrl || !serviceRoleKey) {
+    res.status(500).json({ error: 'Server is not configured for admin employee operations yet (missing SUPABASE_SERVICE_ROLE_KEY).' })
+    return null
+  }
+
+  const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim()
+  if (!token) {
+    res.status(401).json({ error: 'Missing auth token' })
+    return null
+  }
+
+  const admin = createClient(supabaseUrl, serviceRoleKey)
+  const { data: userData, error: userError } = await admin.auth.getUser(token)
+  if (userError || !userData.user) {
+    res.status(401).json({ error: 'Invalid session' })
+    return null
+  }
+
+  const { data: caller } = await admin
+    .from('profiles')
+    .select('role')
+    .eq('id', userData.user.id)
+    .maybeSingle()
+
+  if (caller?.role !== 'admin') {
+    res.status(403).json({ error: 'Admins only' })
+    return null
+  }
+
+  return { admin, callerId: userData.user.id }
+}
+
+const VALID_ROLES = new Set(['employee', 'hr', 'manager', 'admin'])
+const BAN_FOREVER = '876000h'
+const RESEND_INTER_SEND_DELAY_MS = 550
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function resolvePublicRedirectUrl(req: Request): string | undefined {
+  const configured = (process.env.LMS_PUBLIC_URL || '').trim()
+  if (configured && /^https?:\/\//i.test(configured)) {
+    return `${configured.replace(/\/+$/, '')}/app`
+  }
+
+  const origin = (req.headers.origin || '').trim()
+  if (origin && /^https?:\/\//i.test(origin)) {
+    return `${origin.replace(/\/+$/, '')}/app`
+  }
+
+  const protoHeader = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim()
+  const hostHeader = (req.headers['x-forwarded-host'] as string | undefined)?.split(',')[0]?.trim() || req.get('host')
+  if (hostHeader) {
+    const proto = protoHeader || req.protocol || 'https'
+    return `${proto}://${hostHeader}/app`
+  }
+
+  return undefined
+}
+
+function getResendInviteConfig(): { apiKey: string; from: string; organizationName: string } | { error: string } {
+  const apiKey = (process.env.RESEND_API_KEY || '').trim()
+  const from = (process.env.LMS_FROM_EMAIL || process.env.DIGEST_FROM || '').trim()
+  const organizationName = (process.env.ORGANIZATION_NAME || 'Captain LMS').trim() || 'Captain LMS'
+
+  if (!apiKey) {
+    return { error: 'Resend is not configured on the server (missing RESEND_API_KEY).' }
+  }
+  if (!from) {
+    return { error: 'Resend sender address is not configured on the server (missing LMS_FROM_EMAIL or DIGEST_FROM).' }
+  }
+  return { apiKey, from, organizationName }
+}
+
+async function sendInviteEmailViaResend(params: {
+  apiKey: string
+  from: string
+  organizationName: string
+  to: string
+  fullName: string
+  department: string
+  role: string
+  actionLink: string
+}): Promise<{ ok: true; messageId?: string } | { ok: false; error: string }> {
+  const firstName = params.fullName.split(/\s+/)[0] || params.fullName
+  const safeOrg = escapeHtml(params.organizationName)
+  const safeName = escapeHtml(firstName)
+  const safeDept = escapeHtml(params.department)
+  const safeRole = escapeHtml(params.role.toUpperCase())
+  const safeLink = escapeHtml(params.actionLink)
+
+  const subject = `You're invited to ${params.organizationName}`
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #172033; line-height: 1.55;">
+      <div style="background: #0f1b33; color: #ffffff; padding: 18px 22px; border-radius: 12px 12px 0 0;">
+        <strong style="font-size: 16px; letter-spacing: 0.2px;">${safeOrg}</strong>
+      </div>
+      <div style="border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 12px 12px; padding: 24px; background: #ffffff;">
+        <h2 style="margin: 0 0 12px; font-size: 20px; color: #0f1b33;">Welcome, ${safeName}</h2>
+        <p style="margin: 0 0 14px;">You have been invited to join <strong>${safeOrg}</strong>.</p>
+        <p style="margin: 0 0 18px; font-size: 14px; color: #475569;">
+          <strong>Department:</strong> ${safeDept}<br />
+          <strong>Role:</strong> ${safeRole}
+        </p>
+        <p style="margin: 0 0 22px;">
+          <a href="${safeLink}" style="display: inline-block; background: #2f5be8; color: #ffffff; text-decoration: none; font-weight: 600; padding: 12px 20px; border-radius: 8px;">
+            Accept Invitation &amp; Open ${safeOrg}
+          </a>
+        </p>
+        <p style="margin: 0 0 8px; font-size: 12.5px; color: #64748b;">
+          If the button doesn't work, copy and paste this link into your browser:
+        </p>
+        <p style="margin: 0; font-size: 12px; word-break: break-all; color: #334155;">${safeLink}</p>
+      </div>
+    </div>
+  `.trim()
+
+  const text = [
+    `Welcome to ${params.organizationName}, ${firstName}!`,
+    '',
+    `Department: ${params.department}`,
+    `Role: ${params.role}`,
+    '',
+    `Accept your invitation and access the LMS here:`,
+    params.actionLink,
+  ].join('\n')
+
+  const maxAttempts = 3
+  let lastError = 'Resend request failed.'
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: params.from,
+          to: [params.to],
+          subject,
+          html,
+          text,
+        }),
+      })
+
+      const rawBody = await res.text()
+      if (res.ok) {
+        let messageId: string | undefined
+        try {
+          messageId = (JSON.parse(rawBody) as { id?: string }).id
+        } catch {
+          // Ignore non-JSON body on 2xx
+        }
+        console.info(`[invite:resend] delivered to=${params.to} attempt=${attempt} messageId=${messageId ?? 'n/a'}`)
+        return { ok: true, messageId }
+      }
+
+      let parsedMessage = rawBody
+      try {
+        const jsonErr = JSON.parse(rawBody) as { message?: string; name?: string }
+        if (jsonErr.message) parsedMessage = jsonErr.message
+      } catch {
+        // Use raw text
+      }
+
+      lastError = `Resend HTTP ${res.status}: ${parsedMessage.slice(0, 220)}`
+      const retryable = res.status === 429 || res.status >= 500
+      console.warn(`[invite:resend] attempt=${attempt}/${maxAttempts} failed to=${params.to} status=${res.status}: ${parsedMessage.slice(0, 180)}`)
+
+      if (retryable && attempt < maxAttempts) {
+        const retryAfterSec = Number(res.headers.get('retry-after') || '0')
+        const backoffMs = retryAfterSec > 0 ? retryAfterSec * 1000 : 1000 * attempt
+        await sleep(backoffMs)
+        continue
+      }
+
+      return { ok: false, error: lastError }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      lastError = `Resend network error: ${msg}`
+      console.warn(`[invite:resend] network error attempt=${attempt}/${maxAttempts} to=${params.to}: ${msg}`)
+      if (attempt < maxAttempts) {
+        await sleep(800 * attempt)
+        continue
+      }
+      return { ok: false, error: lastError }
+    }
+  }
+
+  return { ok: false, error: lastError }
+}
+
+async function createAndSendInviteViaResend(params: {
+  admin: SupabaseClient
+  resendConfig: { apiKey: string; from: string; organizationName: string }
+  email: string
+  fullName: string
+  department: string
+  role: string
+  redirectTo?: string
+}): Promise<{ ok: true; userId: string; messageId?: string } | { ok: false; error: string }> {
+  const { admin, resendConfig, email, fullName, department, role, redirectTo } = params
+
+  let userId: string | null = null
+  let actionLink: string | null = null
+  let createdNewUser = false
+
+  const linkOptions = {
+    data: { full_name: fullName, department, role: 'employee' },
+    ...(redirectTo ? { redirectTo } : {}),
+  }
+
+  const inviteLinkRes = await admin.auth.admin.generateLink({
+    type: 'invite',
+    email,
+    options: linkOptions,
+  })
+
+  if (!inviteLinkRes.error && inviteLinkRes.data?.user && inviteLinkRes.data?.properties?.action_link) {
+    userId = inviteLinkRes.data.user.id
+    actionLink = inviteLinkRes.data.properties.action_link
+    createdNewUser = true
+  } else {
+    const inviteErrMsg = inviteLinkRes.error?.message || 'Could not generate invite link.'
+    const alreadyRegistered = /already.*registered|already exists|duplicate|email_exists/i.test(inviteErrMsg)
+
+    if (!alreadyRegistered) {
+      console.warn(`[invite:supabase] generateLink(invite) failed email=${email}: ${inviteErrMsg}`)
+      return { ok: false, error: inviteErrMsg }
+    }
+
+    // If user was created in an earlier attempt (e.g. hit Supabase 2-email cap) and never confirmed/signed in,
+    // generate a fresh magic link via Resend instead of failing silently.
+    const magicLinkRes = await admin.auth.admin.generateLink({
+      type: 'magiclink',
+      email,
+      options: redirectTo ? { redirectTo } : undefined,
+    })
+
+    if (magicLinkRes.error || !magicLinkRes.data?.user || !magicLinkRes.data?.properties?.action_link) {
+      console.warn(`[invite:supabase] magiclink fallback failed email=${email}: ${magicLinkRes.error?.message ?? inviteErrMsg}`)
+      return { ok: false, error: inviteErrMsg }
+    }
+
+    const existingUser = magicLinkRes.data.user
+    if (existingUser.email_confirmed_at || existingUser.last_sign_in_at) {
+      return { ok: false, error: 'A user with this email address is already registered and active.' }
+    }
+
+    userId = existingUser.id
+    actionLink = magicLinkRes.data.properties.action_link
+  }
+
+  const sendResult = await sendInviteEmailViaResend({
+    apiKey: resendConfig.apiKey,
+    from: resendConfig.from,
+    organizationName: resendConfig.organizationName,
+    to: email,
+    fullName,
+    department,
+    role,
+    actionLink,
+  })
+
+  if (!sendResult.ok) {
+    if (createdNewUser && userId) {
+      try {
+        await admin.auth.admin.deleteUser(userId)
+      } catch (cleanupErr) {
+        console.warn(`[invite:cleanup] failed to roll back uninvited user=${userId}:`, cleanupErr)
+      }
+    }
+    return { ok: false, error: sendResult.error }
+  }
+
+  const { error: profileErr } = await admin
+    .from('profiles')
+    .update({ role, full_name: fullName, department })
+    .eq('id', userId)
+
+  if (profileErr) {
+    console.warn(`[invite:profile] profile update failed user=${userId}: ${profileErr.message}`)
+  }
+
+  return { ok: true, userId, messageId: sendResult.messageId }
+}
+
+async function handleAdminInviteEmployees(req: Request, res: Response) {
+  const ctx = await verifyAdminCaller(req, res)
+  if (!ctx) return
+  const { admin } = ctx
+
+  const resendConfig = getResendInviteConfig()
+  if ('error' in resendConfig) {
+    console.error(`[invite:bulk] config error: ${resendConfig.error}`)
+    res.status(500).json({ error: resendConfig.error })
+    return
+  }
+
+  const body = (req.body ?? {}) as {
+    rows?: Array<{ full_name?: string; email?: string; department?: string; role?: string }>
+  }
+  const rows = Array.isArray(body.rows) ? body.rows : []
+  if (!rows.length) {
+    res.status(400).json({ error: 'No rows to invite' })
+    return
+  }
+  if (rows.length > 100) {
+    res.status(400).json({ error: 'Max 100 rows per import' })
+    return
+  }
+
+  const redirectTo = resolvePublicRedirectUrl(req)
+  const results: Array<{ email: string; success: boolean; provider?: string; messageId?: string; error?: string }> = []
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx]!
+    const email = (row.email ?? '').trim().toLowerCase()
+    const fullName = (row.full_name ?? '').trim()
+    const department = (row.department ?? '').trim() || 'General'
+    const role = row.role && VALID_ROLES.has(row.role) ? row.role : 'employee'
+
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      results.push({ email: row.email ?? '(missing email)', success: false, error: 'Invalid email address.' })
+      continue
+    }
+    if (!fullName) {
+      results.push({ email, success: false, error: 'Full name is required.' })
+      continue
+    }
+
+    const outcome = await createAndSendInviteViaResend({
+      admin,
+      resendConfig,
+      email,
+      fullName,
+      department,
+      role,
+      redirectTo,
+    })
+
+    if (outcome.ok) {
+      results.push({ email, success: true, provider: 'resend', messageId: outcome.messageId })
+    } else {
+      results.push({ email, success: false, provider: 'resend', error: outcome.error })
+    }
+
+    // Space Resend requests to stay comfortably below Resend's 2 req/sec rate limit
+    if (idx < rows.length - 1) {
+      await sleep(RESEND_INTER_SEND_DELAY_MS)
+    }
+  }
+
+  res.json({ results, provider: 'resend' })
+}
+
+async function handleAdminManageEmployee(req: Request, res: Response) {
+  const ctx = await verifyAdminCaller(req, res)
+  if (!ctx) return
+  const { admin: db, callerId } = ctx
+
+  const body = (req.body ?? {}) as {
+    action?: 'create' | 'update' | 'deactivate' | 'reactivate' | 'delete' | 'get'
+    id?: string
+    email?: string
+    full_name?: string
+    department?: string
+    role?: string
+  }
+
+  const { action, id } = body
+
+  if (action === 'create') {
+    const resendConfig = getResendInviteConfig()
+    if ('error' in resendConfig) {
+      console.error(`[invite:single] config error: ${resendConfig.error}`)
+      res.status(500).json({ error: resendConfig.error })
+      return
+    }
+
+    const email = body.email?.trim().toLowerCase()
+    const fullName = body.full_name?.trim()
+    const role = body.role ?? 'employee'
+    const department = body.department?.trim() || 'General'
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      res.status(400).json({ error: 'Enter a valid email address.' })
+      return
+    }
+    if (!fullName) {
+      res.status(400).json({ error: 'Enter the employee’s name.' })
+      return
+    }
+    if (!VALID_ROLES.has(role)) {
+      res.status(400).json({ error: 'Invalid role.' })
+      return
+    }
+
+    const redirectTo = resolvePublicRedirectUrl(req)
+    const outcome = await createAndSendInviteViaResend({
+      admin: db,
+      resendConfig,
+      email,
+      fullName,
+      department,
+      role,
+      redirectTo,
+    })
+
+    if (!outcome.ok) {
+      res.status(400).json({ error: outcome.error })
+      return
+    }
+
+    res.json({ ok: true, id: outcome.userId, provider: 'resend', messageId: outcome.messageId })
+    return
+  }
+
+  if (!id) {
+    res.status(400).json({ error: 'id is required' })
+    return
+  }
+
+  const { data: target } = await db.from('profiles').select('id, role, full_name').eq('id', id).maybeSingle()
+  if (!target) {
+    res.status(404).json({ error: 'Employee not found' })
+    return
+  }
+
+  const otherActiveAdmins = async (excludeId: string): Promise<number> => {
+    const { count } = await db
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'admin')
+      .eq('is_active', true)
+      .neq('id', excludeId)
+    return count ?? 0
+  }
+
+  if (action === 'get') {
+    const { data } = await db.auth.admin.getUserById(id)
+    res.json({
+      email: data.user?.email ?? null,
+      last_sign_in_at: data.user?.last_sign_in_at ?? null,
+      confirmed: !!data.user?.email_confirmed_at,
+    })
+    return
+  }
+
+  if (action === 'update') {
+    const patch: Record<string, string> = {}
+    if (body.full_name !== undefined) {
+      if (!body.full_name.trim()) {
+        res.status(400).json({ error: 'Name can’t be empty.' })
+        return
+      }
+      patch.full_name = body.full_name.trim()
+    }
+    if (body.role !== undefined) {
+      if (!VALID_ROLES.has(body.role)) {
+        res.status(400).json({ error: 'Invalid role.' })
+        return
+      }
+      if (target.role === 'admin' && body.role !== 'admin' && (await otherActiveAdmins(id)) === 0) {
+        res.status(400).json({ error: 'This is the only active admin — make someone else an admin first.' })
+        return
+      }
+      patch.role = body.role
+    }
+    if (!Object.keys(patch).length) {
+      res.status(400).json({ error: 'Nothing to update.' })
+      return
+    }
+    const { error } = await db.from('profiles').update(patch).eq('id', id)
+    if (error) {
+      res.status(400).json({ error: error.message })
+      return
+    }
+    res.json({ ok: true })
+    return
+  }
+
+  if (action === 'deactivate' || action === 'delete') {
+    if (id === callerId) {
+      res.status(400).json({ error: `You can't ${action} your own account.` })
+      return
+    }
+    if (target.role === 'admin' && (await otherActiveAdmins(id)) === 0) {
+      res.status(400).json({ error: 'This is the only active admin — make someone else an admin first.' })
+      return
+    }
+  }
+
+  if (action === 'deactivate') {
+    const { error: profileError } = await db.from('profiles').update({ is_active: false }).eq('id', id)
+    if (profileError) {
+      res.status(500).json({ error: profileError.message })
+      return
+    }
+    const { error } = await db.auth.admin.updateUserById(id, { ban_duration: BAN_FOREVER })
+    if (error) {
+      res.status(500).json({ error: error.message })
+      return
+    }
+    res.json({ ok: true })
+    return
+  }
+
+  if (action === 'reactivate') {
+    const { error: profileError } = await db.from('profiles').update({ is_active: true }).eq('id', id)
+    if (profileError) {
+      res.status(500).json({ error: profileError.message })
+      return
+    }
+    const { error } = await db.auth.admin.updateUserById(id, { ban_duration: 'none' })
+    if (error) {
+      res.status(500).json({ error: error.message })
+      return
+    }
+    res.json({ ok: true })
+    return
+  }
+
+  if (action === 'delete') {
+    const { error } = await db.auth.admin.deleteUser(id)
+    if (error) {
+      res.status(500).json({ error: error.message })
+      return
+    }
+    res.json({ ok: true })
+    return
+  }
+
+  res.status(400).json({ error: 'Unknown action' })
+}
+
+interface LeaderboardInputProfile {
+  id: string
+  full_name: string
+  department: string
+  role: string
+  is_active?: boolean
+  last_activity_at?: string | null
+}
+
+interface LeaderboardInputModule {
+  id: number
+  course_id?: number | null
+  department: string
+  duration_seconds: number
+  is_draft?: boolean
+  is_archived?: boolean
+}
+
+interface LeaderboardInputCourse {
+  id: number
+  title: string
+  category: string
+  is_published: boolean
+}
+
+interface LeaderboardInputEnrolment {
+  user_id: string
+  course_id: number
+}
+
+interface LeaderboardInputCompletion {
+  user_id: string
+  module_id: number
+  completed: boolean
+  completed_at?: string | null
+  last_watched_at?: string | null
+  watched_seconds?: number | null
+}
+
+interface LeaderboardInputAttempt {
+  user_id: string
+  milestone: string
+  passed: boolean
+  created_at: string
+}
+
+interface LeaderboardInputActivityLog {
+  user_id: string
+  event_type?: string
+  created_at: string
+}
+
+interface LeaderboardInputCriterion {
+  id: number
+  slug: string
+  name: string
+  icon: string
+  tier_order: number
+  match_mode: string
+  min_course_duration_minutes: number
+  min_courses_completed: number
+  min_certificates_earned: number
+  is_active: boolean
+}
+
+interface LeaderboardInputCustomBadge {
+  id: number
+  name: string
+  icon: string
+  is_active: boolean
+}
+
+interface LeaderboardInputBadgeAward {
+  badge_id: number
+  user_id: string
+  awarded_at: string
+}
+
+interface LeaderboardInputIssuedCertificate {
+  id: number
+  user_id: string
+  issued_date: string
+  created_at?: string
+}
+
+interface ServerEarnedBadgePreview {
+  icon: string
+  name: string
+  source: 'criteria' | 'quiz' | 'custom'
+}
+
+interface ServerLeaderboardEntry {
+  id: string
+  fullName: string
+  department: string
+  criteriaBadgesCount: number
+  milestoneQuizBadgesCount: number
+  customBadgesCount: number
+  totalBadges: number
+  badgePreviews: ServerEarnedBadgePreview[]
+  coursesCompleted: number
+  coursesTotal: number
+  courseCompletionPct: number
+  lessonsCompleted: number
+  lessonsTotal: number
+  lessonCompletionPct: number
+  completedCourseMinutes: number
+  certificatesEarned: number
+  activityCountAll: number
+  activityCount30d: number
+  activityCount7d: number
+  activeDays14d: number
+  lastActiveAt: string | null
+  overallScore: number
+}
+
+const DEFAULT_LEADERBOARD_CRITERIA: LeaderboardInputCriterion[] = [
+  {
+    id: 1,
+    slug: 'first-milestone',
+    name: 'Pathfinder',
+    icon: '🌱',
+    tier_order: 1,
+    match_mode: 'all',
+    min_course_duration_minutes: 15,
+    min_courses_completed: 1,
+    min_certificates_earned: 1,
+    is_active: true,
+  },
+  {
+    id: 2,
+    slug: 'bronze-scholar',
+    name: 'Bronze Scholar',
+    icon: '🥉',
+    tier_order: 2,
+    match_mode: 'all',
+    min_course_duration_minutes: 60,
+    min_courses_completed: 2,
+    min_certificates_earned: 2,
+    is_active: true,
+  },
+  {
+    id: 3,
+    slug: 'silver-achiever',
+    name: 'Silver Achiever',
+    icon: '🥈',
+    tier_order: 3,
+    match_mode: 'all',
+    min_course_duration_minutes: 180,
+    min_courses_completed: 3,
+    min_certificates_earned: 4,
+    is_active: true,
+  },
+  {
+    id: 4,
+    slug: 'gold-specialist',
+    name: 'Gold Specialist',
+    icon: '🥇',
+    tier_order: 4,
+    match_mode: 'all',
+    min_course_duration_minutes: 300,
+    min_courses_completed: 5,
+    min_certificates_earned: 6,
+    is_active: true,
+  },
+  {
+    id: 5,
+    slug: 'captain-distinction',
+    name: 'Captain Distinction',
+    icon: '🏆',
+    tier_order: 5,
+    match_mode: 'all',
+    min_course_duration_minutes: 600,
+    min_courses_completed: 8,
+    min_certificates_earned: 10,
+    is_active: true,
+  },
+]
+
+const MILESTONE_QUIZ_META: Record<string, { icon: string; name: string }> = {
+  '1': { icon: '🥉', name: 'Bronze Milestone' },
+  '2': { icon: '🥈', name: 'Silver Milestone' },
+  '3': { icon: '🥇', name: 'Gold Milestone' },
+  '4': { icon: '💎', name: 'Diamond Milestone' },
+  '5': { icon: '💎', name: 'Diamond II Milestone' },
+  final: { icon: '🏆', name: 'Captain Master' },
+}
+
+function lbParseTimeMs(iso: string | null | undefined): number | null {
+  if (!iso) return null
+  const ms = Date.parse(iso)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function lbComputeOrganizationLeaderboard(input: {
+  profiles: LeaderboardInputProfile[]
+  modules: LeaderboardInputModule[]
+  courses: LeaderboardInputCourse[]
+  enrolments: LeaderboardInputEnrolment[]
+  completions: LeaderboardInputCompletion[]
+  attempts: LeaderboardInputAttempt[]
+  activityLogs: LeaderboardInputActivityLog[]
+  badgeCriteria: LeaderboardInputCriterion[]
+  customBadges: LeaderboardInputCustomBadge[]
+  badgeAwards: LeaderboardInputBadgeAward[]
+  issuedCertificates: LeaderboardInputIssuedCertificate[]
+  departments: string[]
+}) {
+  const nowMs = Date.now()
+  const cutoff7d = nowMs - 7 * 86_400_000
+  const cutoff14d = nowMs - 14 * 86_400_000
+  const cutoff30d = nowMs - 30 * 86_400_000
+
+  const activeEmployees = input.profiles.filter(
+    (p) => p.role === 'employee' && p.is_active !== false,
+  )
+
+  const publishedModules = input.modules.filter((m) => !m.is_draft && !m.is_archived)
+  const publishedCourses = input.courses.filter((c) => c.is_published)
+
+  const lessonsByCourseId = new Map<number, LeaderboardInputModule[]>()
+  const unassignedModules: LeaderboardInputModule[] = []
+  for (const mod of publishedModules) {
+    if (typeof mod.course_id === 'number' && mod.course_id > 0) {
+      const arr = lessonsByCourseId.get(mod.course_id)
+      if (arr) arr.push(mod)
+      else lessonsByCourseId.set(mod.course_id, [mod])
+    } else {
+      unassignedModules.push(mod)
+    }
+  }
+
+  const useVirtualCourses = publishedCourses.length === 0 && publishedModules.length > 0
+  const virtualGroups = new Map<string, LeaderboardInputModule[]>()
+  if (useVirtualCourses) {
+    for (const m of publishedModules) {
+      const dept = m.department || 'General'
+      const arr = virtualGroups.get(dept)
+      if (arr) arr.push(m)
+      else virtualGroups.set(dept, [m])
+    }
+  }
+
+  const enrolledCourseIdsByUser = new Map<string, Set<number>>()
+  for (const enr of input.enrolments) {
+    const set = enrolledCourseIdsByUser.get(enr.user_id)
+    if (set) set.add(enr.course_id)
+    else enrolledCourseIdsByUser.set(enr.user_id, new Set([enr.course_id]))
+  }
+
+  const completionsByUser = new Map<string, LeaderboardInputCompletion[]>()
+  for (const comp of input.completions) {
+    const arr = completionsByUser.get(comp.user_id)
+    if (arr) arr.push(comp)
+    else completionsByUser.set(comp.user_id, [comp])
+  }
+
+  const attemptsByUser = new Map<string, LeaderboardInputAttempt[]>()
+  for (const att of input.attempts) {
+    const arr = attemptsByUser.get(att.user_id)
+    if (arr) arr.push(att)
+    else attemptsByUser.set(att.user_id, [att])
+  }
+
+  const logsByUser = new Map<string, LeaderboardInputActivityLog[]>()
+  for (const log of input.activityLogs) {
+    const arr = logsByUser.get(log.user_id)
+    if (arr) arr.push(log)
+    else logsByUser.set(log.user_id, [log])
+  }
+
+  const activeCriteria = [...input.badgeCriteria]
+    .filter(
+      (c) =>
+        c.is_active !== false &&
+        (c.min_course_duration_minutes > 0 ||
+          c.min_courses_completed > 0 ||
+          c.min_certificates_earned > 0),
+    )
+    .sort((a, b) => a.tier_order - b.tier_order || a.id - b.id)
+
+  const customBadgeMap = new Map<number, LeaderboardInputCustomBadge>()
+  for (const cb of input.customBadges) {
+    if (cb.is_active !== false) customBadgeMap.set(cb.id, cb)
+  }
+
+  const awardsByUser = new Map<string, LeaderboardInputBadgeAward[]>()
+  for (const aw of input.badgeAwards) {
+    if (!customBadgeMap.has(aw.badge_id)) continue
+    const arr = awardsByUser.get(aw.user_id)
+    if (arr) arr.push(aw)
+    else awardsByUser.set(aw.user_id, [aw])
+  }
+
+  const issuedCertsByUser = new Map<string, LeaderboardInputIssuedCertificate[]>()
+  for (const ic of input.issuedCertificates) {
+    const arr = issuedCertsByUser.get(ic.user_id)
+    if (arr) arr.push(ic)
+    else issuedCertsByUser.set(ic.user_id, [ic])
+  }
+
+  const deptSet = new Set<string>(input.departments)
+
+  const entries: ServerLeaderboardEntry[] = activeEmployees.map((emp) => {
+    const dept = emp.department || 'General'
+    deptSet.add(dept)
+
+    const userCompletions = completionsByUser.get(emp.id) ?? []
+    const doneModuleIds = new Set<number>()
+    for (const c of userCompletions) {
+      if (c.completed) doneModuleIds.add(c.module_id)
+    }
+
+    const enrolledSet = enrolledCourseIdsByUser.get(emp.id) ?? new Set<number>()
+
+    let coursesTotal = 0
+    let coursesCompleted = 0
+    let completedCourseMinutes = 0
+    const visibleModuleIds = new Set<number>()
+
+    if (useVirtualCourses) {
+      for (const [vDept, vMods] of virtualGroups.entries()) {
+        if (vDept !== 'General' && vDept !== dept) continue
+        if (vMods.length === 0) continue
+        coursesTotal += 1
+        for (const m of vMods) visibleModuleIds.add(m.id)
+        if (vMods.every((m) => doneModuleIds.has(m.id))) {
+          coursesCompleted += 1
+          const totalSec = vMods.reduce((sum, m) => sum + (m.duration_seconds > 0 ? m.duration_seconds : 300), 0)
+          completedCourseMinutes += Math.round(totalSec / 60)
+        }
+      }
+    } else {
+      for (const course of publishedCourses) {
+        const courseLessons = lessonsByCourseId.get(course.id) ?? []
+        if (courseLessons.length === 0) continue
+        const isExplicitlyEnrolled = enrolledSet.has(course.id)
+        const relevantLessons = isExplicitlyEnrolled
+          ? courseLessons
+          : courseLessons.filter((l) => l.department === 'General' || l.department === dept)
+
+        if (relevantLessons.length === 0) continue
+
+        coursesTotal += 1
+        for (const l of relevantLessons) visibleModuleIds.add(l.id)
+
+        if (relevantLessons.every((l) => doneModuleIds.has(l.id))) {
+          coursesCompleted += 1
+          const totalSec = relevantLessons.reduce(
+            (sum, l) => sum + (l.duration_seconds > 0 ? l.duration_seconds : 300),
+            0,
+          )
+          completedCourseMinutes += Math.round(totalSec / 60)
+        }
+      }
+      for (const um of unassignedModules) {
+        if (um.department === 'General' || um.department === dept) {
+          visibleModuleIds.add(um.id)
+        }
+      }
+    }
+
+    const lessonsTotal = visibleModuleIds.size
+    let lessonsCompleted = 0
+    for (const mid of visibleModuleIds) {
+      if (doneModuleIds.has(mid)) lessonsCompleted += 1
+    }
+
+    const courseCompletionPct = coursesTotal > 0 ? Math.round((coursesCompleted / coursesTotal) * 100) : 0
+    const lessonCompletionPct = lessonsTotal > 0 ? Math.round((lessonsCompleted / lessonsTotal) * 100) : 0
+
+    const userAttempts = attemptsByUser.get(emp.id) ?? []
+    const passedMilestones = new Set<string>()
+    for (const att of userAttempts) {
+      if (att.passed) passedMilestones.add(att.milestone)
+    }
+
+    const userIssuedCerts = issuedCertsByUser.get(emp.id) ?? []
+    const certificatesEarned = coursesCompleted + passedMilestones.size + userIssuedCerts.length
+
+    const badgePreviews: ServerEarnedBadgePreview[] = []
+    let criteriaBadgesCount = 0
+
+    for (const rule of activeCriteria) {
+      const checks: boolean[] = []
+      if (rule.min_course_duration_minutes > 0) {
+        checks.push(completedCourseMinutes >= rule.min_course_duration_minutes)
+      }
+      if (rule.min_courses_completed > 0) {
+        checks.push(coursesCompleted >= rule.min_courses_completed)
+      }
+      if (rule.min_certificates_earned > 0) {
+        checks.push(certificatesEarned >= rule.min_certificates_earned)
+      }
+      const metCount = checks.filter(Boolean).length
+      const unlocked =
+        checks.length > 0 && (rule.match_mode === 'any' ? metCount > 0 : metCount === checks.length)
+      if (unlocked) {
+        criteriaBadgesCount += 1
+        badgePreviews.push({ icon: rule.icon || '🏅', name: rule.name, source: 'criteria' })
+      }
+    }
+
+    const orderedQuizKeys = ['1', '2', '3', '4', '5', 'final']
+    let milestoneQuizBadgesCount = 0
+    for (const key of orderedQuizKeys) {
+      if (passedMilestones.has(key)) {
+        milestoneQuizBadgesCount += 1
+        const meta = MILESTONE_QUIZ_META[key] ?? { icon: '🎖️', name: `Milestone ${key}` }
+        badgePreviews.push({ icon: meta.icon, name: meta.name, source: 'quiz' })
+      }
+    }
+    for (const m of passedMilestones) {
+      if (!orderedQuizKeys.includes(m)) {
+        milestoneQuizBadgesCount += 1
+        badgePreviews.push({ icon: '🎖️', name: `Milestone ${m}`, source: 'quiz' })
+      }
+    }
+
+    const userAwards = awardsByUser.get(emp.id) ?? []
+    const seenCustomIds = new Set<number>()
+    let customBadgesCount = 0
+    for (const aw of userAwards) {
+      if (seenCustomIds.has(aw.badge_id)) continue
+      const badge = customBadgeMap.get(aw.badge_id)
+      if (!badge) continue
+      seenCustomIds.add(aw.badge_id)
+      customBadgesCount += 1
+      badgePreviews.push({ icon: badge.icon || '🌟', name: badge.name, source: 'custom' })
+    }
+
+    const totalBadges = criteriaBadgesCount + milestoneQuizBadgesCount + customBadgesCount
+
+    const activityTimestamps: number[] = []
+    let latestMs: number | null = lbParseTimeMs(emp.last_activity_at)
+
+    const recordTs = (iso: string | null | undefined, countEvent = true) => {
+      const ms = lbParseTimeMs(iso)
+      if (ms === null) return
+      if (latestMs === null || ms > latestMs) latestMs = ms
+      if (countEvent) activityTimestamps.push(ms)
+    }
+
+    for (const comp of userCompletions) {
+      if (comp.completed) {
+        recordTs(comp.completed_at ?? comp.last_watched_at, true)
+      } else if ((comp.watched_seconds ?? 0) > 0 && comp.last_watched_at) {
+        recordTs(comp.last_watched_at, true)
+      }
+    }
+    for (const att of userAttempts) {
+      recordTs(att.created_at, true)
+    }
+    for (const aw of userAwards) {
+      recordTs(aw.awarded_at, true)
+    }
+    for (const ic of userIssuedCerts) {
+      recordTs(ic.created_at ?? `${ic.issued_date}T12:00:00Z`, true)
+    }
+
+    const userLogs = logsByUser.get(emp.id) ?? []
+    for (const log of userLogs) {
+      if (log.event_type === 'quiz_attempt') {
+        recordTs(log.created_at, false)
+      } else {
+        recordTs(log.created_at, true)
+      }
+    }
+
+    let activityCount7d = 0
+    let activityCount30d = 0
+    const activeDaySet14d = new Set<string>()
+    for (const ts of activityTimestamps) {
+      if (ts >= cutoff7d) activityCount7d += 1
+      if (ts >= cutoff30d) activityCount30d += 1
+      if (ts >= cutoff14d) activeDaySet14d.add(new Date(ts).toISOString().slice(0, 10))
+    }
+
+    const overallScore = Math.round(
+      totalBadges * 120 +
+        coursesCompleted * 100 +
+        Math.min(100, Math.max(0, courseCompletionPct)) +
+        Math.min(activityCount30d, 40) * 10 +
+        Math.min(activeDaySet14d.size, 14) * 15,
+    )
+
+    return {
+      id: emp.id,
+      fullName: emp.full_name,
+      department: dept,
+      criteriaBadgesCount,
+      milestoneQuizBadgesCount,
+      customBadgesCount,
+      totalBadges,
+      badgePreviews: badgePreviews.slice(0, 8),
+      coursesCompleted,
+      coursesTotal,
+      courseCompletionPct,
+      lessonsCompleted,
+      lessonsTotal,
+      lessonCompletionPct,
+      completedCourseMinutes,
+      certificatesEarned,
+      activityCountAll: activityTimestamps.length,
+      activityCount30d,
+      activityCount7d,
+      activeDays14d: activeDaySet14d.size,
+      lastActiveAt: latestMs !== null ? new Date(latestMs).toISOString() : null,
+      overallScore,
+    }
+  })
+
+  entries.sort(
+    (a, b) =>
+      b.overallScore - a.overallScore ||
+      b.totalBadges - a.totalBadges ||
+      b.coursesCompleted - a.coursesCompleted ||
+      b.activityCount30d - a.activityCount30d ||
+      a.fullName.localeCompare(b.fullName),
+  )
+
+  const totalEmployees = entries.length
+  const totalBadgesAwarded = entries.reduce((s, e) => s + e.totalBadges, 0)
+  const avgCourseCompletionPct = totalEmployees
+    ? Math.round(entries.reduce((s, e) => s + e.courseCompletionPct, 0) / totalEmployees)
+    : 0
+  const activeLast7DaysCount = entries.filter((e) => {
+    const ms = lbParseTimeMs(e.lastActiveAt)
+    return (ms !== null && ms >= cutoff7d) || e.activityCount7d > 0
+  }).length
+  const activeLast7DaysPct = totalEmployees ? Math.round((activeLast7DaysCount / totalEmployees) * 100) : 0
+  const totalCoursesCompleted = entries.reduce((s, e) => s + e.coursesCompleted, 0)
+  const departments = ['All', ...[...deptSet].filter((d) => d && d !== 'All').sort((a, b) => a.localeCompare(b))]
+
+  return {
+    entries,
+    departments,
+    summary: {
+      totalEmployees,
+      totalBadgesAwarded,
+      avgCourseCompletionPct,
+      activeLast7DaysCount,
+      activeLast7DaysPct,
+      totalCoursesCompleted,
+    },
+    generatedAt: new Date(nowMs).toISOString(),
+    source: 'server' as const,
+  }
+}
+
+async function handleOrganizationLeaderboard(req: Request, res: Response) {
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim()
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim()
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    res.status(503).json({
+      error: 'Organization leaderboard API requires SUPABASE_SERVICE_ROLE_KEY.',
+      code: 'not_configured',
+    })
+    return
+  }
+
+  const token = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim()
+  if (!token) {
+    res.status(401).json({ error: 'Missing auth token' })
+    return
+  }
+
+  const admin = createClient(supabaseUrl, serviceRoleKey)
+  const { data: userData, error: userError } = await admin.auth.getUser(token)
+  if (userError || !userData.user) {
+    res.status(401).json({ error: 'Invalid session' })
+    return
+  }
+
+  try {
+    const cutoff30dIso = new Date(Date.now() - 30 * 86_400_000).toISOString()
+
+    const [
+      profilesRes,
+      modulesRes,
+      coursesRes,
+      enrolmentsRes,
+      completionsRes,
+      attemptsRes,
+      activityLogsRes,
+      criteriaRes,
+      customBadgesRes,
+      awardsRes,
+      issuedCertsRes,
+      deptsRes,
+    ] = await Promise.all([
+      admin.from('profiles').select('id, full_name, department, role, is_active, last_activity_at'),
+      admin.from('modules').select('id, course_id, department, duration_seconds, is_draft, is_archived'),
+      admin.from('courses').select('id, title, category, is_published'),
+      admin.from('course_enrolments').select('user_id, course_id'),
+      admin.from('video_completions').select('user_id, module_id, completed, completed_at, last_watched_at, watched_seconds'),
+      admin.from('quiz_attempts').select('user_id, milestone, passed, created_at'),
+      admin.from('learning_activity_logs').select('user_id, event_type, created_at').gte('created_at', cutoff30dIso),
+      admin.from('badge_criteria').select('id, slug, name, icon, tier_order, match_mode, min_course_duration_minutes, min_courses_completed, min_certificates_earned, is_active'),
+      admin.from('custom_badges').select('id, name, icon, is_active'),
+      admin.from('employee_badge_awards').select('badge_id, user_id, awarded_at'),
+      admin.from('issued_certificates').select('id, user_id, issued_date, created_at'),
+      admin.from('departments').select('name').order('name'),
+    ])
+
+    if (profilesRes.error) {
+      res.status(500).json({ error: profilesRes.error.message })
+      return
+    }
+
+    const badgeCriteria = !criteriaRes.error && criteriaRes.data
+      ? (criteriaRes.data as LeaderboardInputCriterion[])
+      : DEFAULT_LEADERBOARD_CRITERIA
+
+    const payload = lbComputeOrganizationLeaderboard({
+      profiles: (profilesRes.data ?? []) as LeaderboardInputProfile[],
+      modules: (modulesRes.data ?? []) as LeaderboardInputModule[],
+      courses: (!coursesRes.error && coursesRes.data ? coursesRes.data : []) as LeaderboardInputCourse[],
+      enrolments: (!enrolmentsRes.error && enrolmentsRes.data ? enrolmentsRes.data : []) as LeaderboardInputEnrolment[],
+      completions: (!completionsRes.error && completionsRes.data ? completionsRes.data : []) as LeaderboardInputCompletion[],
+      attempts: (!attemptsRes.error && attemptsRes.data ? attemptsRes.data : []) as LeaderboardInputAttempt[],
+      activityLogs: (!activityLogsRes.error && activityLogsRes.data ? activityLogsRes.data : []) as LeaderboardInputActivityLog[],
+      badgeCriteria,
+      customBadges: (!customBadgesRes.error && customBadgesRes.data ? customBadgesRes.data : []) as LeaderboardInputCustomBadge[],
+      badgeAwards: (!awardsRes.error && awardsRes.data ? awardsRes.data : []) as LeaderboardInputBadgeAward[],
+      issuedCertificates: (!issuedCertsRes.error && issuedCertsRes.data ? issuedCertsRes.data : []) as LeaderboardInputIssuedCertificate[],
+      departments: (!deptsRes.error && deptsRes.data ? (deptsRes.data as { name: string }[]).map((d) => d.name) : []),
+    })
+
+    res.json(payload)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[organization-leaderboard] failed:', msg)
+    res.status(500).json({ error: msg })
+  }
+}
+
 async function startServer() {
   const app = express()
   app.use(express.json({ limit: '2mb' }))
@@ -728,8 +1920,29 @@ async function startServer() {
     })
   })
 
+  app.get('/api/organization-leaderboard', (req: Request, res: Response) => {
+    void handleOrganizationLeaderboard(req, res)
+  })
+
   app.post('/api/generate-questions', (req: Request, res: Response) => {
     void handleGenerateQuestions(req, res)
+  })
+  app.post('/.netlify/functions/generate-questions', (req: Request, res: Response) => {
+    void handleGenerateQuestions(req, res)
+  })
+
+  app.post('/api/admin-invite-employees', (req: Request, res: Response) => {
+    void handleAdminInviteEmployees(req, res)
+  })
+  app.post('/.netlify/functions/admin-invite-employees', (req: Request, res: Response) => {
+    void handleAdminInviteEmployees(req, res)
+  })
+
+  app.post('/api/admin-manage-employee', (req: Request, res: Response) => {
+    void handleAdminManageEmployee(req, res)
+  })
+  app.post('/.netlify/functions/admin-manage-employee', (req: Request, res: Response) => {
+    void handleAdminManageEmployee(req, res)
   })
 
   if (isProd) {

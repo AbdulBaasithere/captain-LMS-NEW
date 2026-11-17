@@ -12,11 +12,25 @@
 // endpoint properly (no open invite-anyone-you-want endpoint).
 
 import { createClient } from '@supabase/supabase-js'
+import {
+  createAndSendInviteViaResend,
+  getResendInviteConfig,
+  RESEND_INTER_SEND_DELAY_MS,
+  resolvePublicRedirectUrl,
+  sleep,
+} from './_shared/resend-invite'
 
 interface InviteRow {
-  full_name: string
-  email: string
-  department: string
+  full_name?: string
+  email?: string
+  department?: string
+  role?: string
+}
+
+const VALID_ROLES = new Set(['employee', 'hr', 'manager', 'admin'])
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
 export default async (req: Request) => {
@@ -25,23 +39,28 @@ export default async (req: Request) => {
   const supabaseUrl = process.env.SUPABASE_URL
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
   if (!supabaseUrl || !serviceRoleKey) {
-    return new Response(JSON.stringify({ error: 'Server is not configured for invites yet.' }), { status: 500 })
+    return json({ error: 'Server is not configured for invites yet.' }, 500)
+  }
+
+  const resendConfig = getResendInviteConfig()
+  if ('error' in resendConfig) {
+    return json({ error: resendConfig.error }, 500)
   }
 
   const authHeader = req.headers.get('authorization') ?? ''
   const token = authHeader.replace(/^Bearer\s+/i, '')
-  if (!token) return new Response(JSON.stringify({ error: 'Missing auth token' }), { status: 401 })
+  if (!token) return json({ error: 'Missing auth token' }, 401)
 
   const admin = createClient(supabaseUrl, serviceRoleKey)
 
   const { data: userData, error: userError } = await admin.auth.getUser(token)
   if (userError || !userData.user) {
-    return new Response(JSON.stringify({ error: 'Invalid session' }), { status: 401 })
+    return json({ error: 'Invalid session' }, 401)
   }
 
   const { data: callerProfile } = await admin.from('profiles').select('role').eq('id', userData.user.id).single()
   if (callerProfile?.role !== 'admin') {
-    return new Response(JSON.stringify({ error: 'Admins only' }), { status: 403 })
+    return json({ error: 'Admins only' }, 403)
   }
 
   let rows: InviteRow[]
@@ -49,20 +68,50 @@ export default async (req: Request) => {
     const body = (await req.json()) as { rows?: InviteRow[] }
     rows = body.rows ?? []
   } catch {
-    return new Response(JSON.stringify({ error: 'Invalid request body' }), { status: 400 })
+    return json({ error: 'Invalid request body' }, 400)
   }
-  if (!rows.length) return new Response(JSON.stringify({ error: 'No rows to invite' }), { status: 400 })
-  if (rows.length > 100) return new Response(JSON.stringify({ error: 'Max 100 rows per import' }), { status: 400 })
+  if (!rows.length) return json({ error: 'No rows to invite' }, 400)
+  if (rows.length > 100) return json({ error: 'Max 100 rows per import' }, 400)
 
-  const results: { email: string; success: boolean; error?: string }[] = []
-  for (const row of rows) {
-    const { error } = await admin.auth.admin.inviteUserByEmail(row.email, {
-      data: { full_name: row.full_name, department: row.department, role: 'employee' },
+  const redirectTo = resolvePublicRedirectUrl(req)
+  const results: { email: string; success: boolean; provider?: string; messageId?: string; error?: string }[] = []
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx]!
+    const email = (row.email ?? '').trim().toLowerCase()
+    const fullName = (row.full_name ?? '').trim()
+    const department = (row.department ?? '').trim() || 'General'
+    const role = row.role && VALID_ROLES.has(row.role) ? row.role : 'employee'
+
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      results.push({ email: row.email ?? '(missing email)', success: false, error: 'Invalid email address.' })
+      continue
+    }
+    if (!fullName) {
+      results.push({ email, success: false, error: 'Full name is required.' })
+      continue
+    }
+
+    const outcome = await createAndSendInviteViaResend({
+      admin,
+      resendConfig,
+      email,
+      fullName,
+      department,
+      role,
+      redirectTo,
     })
-    results.push({ email: row.email, success: !error, error: error?.message })
-    // Small delay between invites — Supabase's free-tier shared SMTP has a send-rate limit.
-    await new Promise((resolve) => setTimeout(resolve, 400))
+
+    if (outcome.ok) {
+      results.push({ email, success: true, provider: 'resend', messageId: outcome.messageId })
+    } else {
+      results.push({ email, success: false, provider: 'resend', error: outcome.error })
+    }
+
+    if (idx < rows.length - 1) {
+      await sleep(RESEND_INTER_SEND_DELAY_MS)
+    }
   }
 
-  return new Response(JSON.stringify({ results }), { status: 200, headers: { 'content-type': 'application/json' } })
+  return json({ results, provider: 'resend' }, 200)
 }

@@ -16,6 +16,7 @@ async function logout() {
 const links = [
   { to: '/hr/overview', label: 'KPI & Analytics', short: 'Analytics', icon: '▦' },
   { to: '/hr/compliance', label: 'Compliance & Emails', short: 'Compliance', icon: '✓' },
+  { to: '/hr/leaderboard', label: 'Org Leaderboard', short: 'Board', icon: '🏆' },
 ]
 </script>
 

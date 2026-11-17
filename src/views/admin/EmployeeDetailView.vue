@@ -7,7 +7,34 @@ import { logActivity } from '@/lib/activity'
 import { loadDepartments } from '@/lib/departments'
 import { manageEmployee, isActive } from '@/lib/employees'
 import { allMilestonesForTrack, milestoneLabel, attemptsFor, maxAttemptsFor, hasPassed, loadTrackData } from '@/lib/quiz'
-import type { Profile, QuizAttempt, QuizAttemptGrant, Department, Module } from '@/lib/database.types'
+import { loadCourses } from '@/lib/courses'
+import {
+  assignCourseToEmployees,
+  updateCourseAssignmentDeadline,
+  unassignCourseFromEmployee,
+} from '@/lib/courseAssignments'
+import { loadIssuedCertificates, type IssuedCertificate } from '@/lib/issuedCertificates'
+import {
+  loadBadgeCriteria,
+  loadCustomBadges,
+  loadEmployeeBadgeAwards,
+  computeLearnerBadgeMetrics,
+  evaluateAllBadges,
+  formatDurationMinutes,
+  type BadgeCriterion,
+  type CustomBadge,
+  type EmployeeBadgeAward,
+} from '@/lib/badges'
+import type {
+  Course,
+  CourseEnrolment,
+  Department,
+  Module,
+  Profile,
+  QuizAttempt,
+  QuizAttemptGrant,
+  VideoCompletion,
+} from '@/lib/database.types'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +55,21 @@ const departments = ref<Department[]>([])
 const selectedDepartment = ref('')
 const savingDepartment = ref(false)
 const track = ref<Module[]>([])
+const completions = ref<VideoCompletion[]>([])
+const badgeCriteria = ref<BadgeCriterion[]>([])
+const employeeCourses = ref<Awaited<ReturnType<typeof loadCourses>>>([])
+const allCourses = ref<Course[]>([])
+const enrolments = ref<CourseEnrolment[]>([])
+const assignCourseId = ref<number | ''>('')
+const assignDeadline = ref('')
+const assigningCourse = ref(false)
+const assignMessage = ref<{ ok: boolean; text: string } | null>(null)
+const editingEnrolmentDeadlines = ref<Record<number, string>>({})
+const busyEnrolmentId = ref<number | null>(null)
+
+const employeeIssuedCerts = ref<IssuedCertificate[]>([])
+const employeeBadgeAwards = ref<EmployeeBadgeAward[]>([])
+const customBadgesById = ref<Map<number, CustomBadge>>(new Map())
 
 const managerOptions = ref<Profile[]>([])
 const managerId = ref('')
@@ -132,12 +174,105 @@ async function load() {
   hrEmail.value = emp?.hr_email ?? ''
 
   if (emp) {
-    const trackData = await loadTrackData(employeeId, emp.department)
+    const [trackData, badgeRes, { data: courseRows }, { data: enrolRows }, issuedRes, customRes, awardsRes] =
+      await Promise.all([
+        loadTrackData(employeeId, emp.department),
+        loadBadgeCriteria({ includeInactive: false }),
+        supabase.from('courses').select('*').order('title'),
+        supabase.from('course_enrolments').select('*').eq('user_id', employeeId).order('enrolled_at', { ascending: false }),
+        loadIssuedCertificates({ userId: employeeId }),
+        loadCustomBadges({ includeInactive: true }),
+        loadEmployeeBadgeAwards({ userId: employeeId }),
+      ])
     track.value = trackData.track
+    completions.value = trackData.completions
+    employeeCourses.value = await loadCourses(trackData.track)
+    badgeCriteria.value = badgeRes.criteria
+    allCourses.value = (courseRows ?? []) as Course[]
+    enrolments.value = (enrolRows ?? []) as CourseEnrolment[]
+    editingEnrolmentDeadlines.value = Object.fromEntries(
+      enrolments.value.map((e) => [e.id, e.deadline_date ?? '']),
+    )
+    assignDeadline.value = emp.due_date ?? ''
+    employeeIssuedCerts.value = issuedRes.certificates
+    employeeBadgeAwards.value = awardsRes.awards
+    customBadgesById.value = new Map(customRes.badges.map((b) => [b.id, b]))
     const doneIds = new Set(trackData.completions.filter((c) => c.completed).map((c) => c.module_id))
     allModulesDone.value = trackData.track.length > 0 && trackData.track.every((m) => doneIds.has(m.id))
   }
   loading.value = false
+}
+
+const coursesById = computed(() => {
+  const m = new Map<number, Course>()
+  for (const c of allCourses.value) m.set(c.id, c)
+  return m
+})
+
+const assignableCourses = computed(() => {
+  const assignedIds = new Set(enrolments.value.map((e) => e.course_id))
+  return allCourses.value.filter((c) => !assignedIds.has(c.id))
+})
+
+async function handleAssignCourse() {
+  if (!employee.value || !assignCourseId.value) return
+  const c = coursesById.value.get(Number(assignCourseId.value))
+  if (!c) return
+  assigningCourse.value = true
+  assignMessage.value = null
+  const profilesMap = new Map<string, Profile>([[employee.value.id, employee.value]])
+  const res = await assignCourseToEmployees({
+    courseId: c.id,
+    courseTitle: c.title,
+    userIds: [employee.value.id],
+    deadlineDate: assignDeadline.value || null,
+    assignedBy: auth.profile?.id,
+    profilesById: profilesMap,
+  })
+  assigningCourse.value = false
+  if (!res.ok) {
+    assignMessage.value = { ok: false, text: res.error ?? 'Could not assign course.' }
+    return
+  }
+  await logActivity(auth.profile?.id, `Assigned course "${c.title}" to ${employee.value.full_name}`)
+  assignMessage.value = { ok: true, text: `Assigned "${c.title}" to ${employee.value.full_name}.` }
+  assignCourseId.value = ''
+  await load()
+}
+
+async function handleSaveEnrolmentDeadline(e: CourseEnrolment) {
+  busyEnrolmentId.value = e.id
+  const nextDate = editingEnrolmentDeadlines.value[e.id] ?? ''
+  const res = await updateCourseAssignmentDeadline({
+    enrolmentId: e.id,
+    deadlineDate: nextDate || null,
+    isCompleted: e.status === 'completed' || Boolean(e.completed_at),
+    hasStarted: e.status === 'in_progress' || e.progress_pct > 0 || Boolean(e.started_at),
+  })
+  busyEnrolmentId.value = null
+  if (!res.ok) {
+    assignMessage.value = { ok: false, text: res.error ?? 'Could not update deadline.' }
+    return
+  }
+  const cTitle = coursesById.value.get(e.course_id)?.title ?? `Course #${e.course_id}`
+  await logActivity(auth.profile?.id, `Updated deadline for "${cTitle}" (${employee.value?.full_name})`)
+  assignMessage.value = { ok: true, text: `Updated deadline for "${cTitle}".` }
+  await load()
+}
+
+async function handleUnassignCourse(e: CourseEnrolment) {
+  const cTitle = coursesById.value.get(e.course_id)?.title ?? `Course #${e.course_id}`
+  if (!window.confirm(`Remove assignment of "${cTitle}" from ${employee.value?.full_name}?`)) return
+  busyEnrolmentId.value = e.id
+  const res = await unassignCourseFromEmployee(e.id)
+  busyEnrolmentId.value = null
+  if (!res.ok) {
+    assignMessage.value = { ok: false, text: res.error ?? 'Could not unassign course.' }
+    return
+  }
+  await logActivity(auth.profile?.id, `Unassigned course "${cTitle}" from ${employee.value?.full_name}`)
+  assignMessage.value = { ok: true, text: `Removed "${cTitle}" assignment.` }
+  await load()
 }
 
 onMounted(async () => {
@@ -233,6 +368,17 @@ async function sendEscalation() {
   await logActivity(auth.profile?.id, `Sent a compliance escalation notice to ${employee.value?.full_name}`)
   escalating.value = false
 }
+
+const badgeSummary = computed(() => {
+  const metrics = computeLearnerBadgeMetrics({
+    courses: employeeCourses.value.filter((c) => c.lessons.length > 0),
+    completions: completions.value,
+    passedAttempts: attempts.value.filter((a) => a.passed),
+    extraCertificatesCount: employeeIssuedCerts.value.length,
+  })
+  const evaluations = evaluateAllBadges(badgeCriteria.value, metrics)
+  return { metrics, evaluations }
+})
 
 const rows = computed(() =>
   allMilestonesForTrack(track.value).map((m) => {
@@ -385,6 +531,169 @@ async function grantExtra(milestone: string) {
       <p class="hint" style="margin-top: 8px">
         Copied automatically on course-start, 7-day inactivity, deadline, and overdue email alerts.
       </p>
+    </div>
+
+    <!-- Assigned Courses Management Card -->
+    <div class="card" style="margin-bottom: 20px">
+      <div class="panel-title">
+        <div>
+          <h3>Assigned Courses</h3>
+          <p class="sub" style="margin: 2px 0 0">
+            Assign any course directly to {{ employee.full_name }} (including cross-department courses) and manage deadlines.
+          </p>
+        </div>
+        <span class="sub tabular" style="font-weight: 700">{{ enrolments.length }} assigned</span>
+      </div>
+
+      <div style="padding: 12px 18px 16px; border-bottom: 1px solid var(--border)">
+        <div class="row wrap" style="gap: 10px; align-items: flex-end">
+          <div class="field" style="flex: 2; min-width: 220px; margin: 0">
+            <label>Assign a course</label>
+            <select v-model="assignCourseId">
+              <option value="">Select course…</option>
+              <option v-for="c in assignableCourses" :key="c.id" :value="c.id">
+                {{ c.title }} · {{ c.category }}{{ c.is_published ? '' : ' (Hidden)' }}
+              </option>
+            </select>
+          </div>
+          <div class="field" style="width: 170px; margin: 0">
+            <label>Deadline (optional)</label>
+            <input v-model="assignDeadline" type="date" />
+          </div>
+          <button
+            class="btn btn-primary btn-sm"
+            :disabled="assigningCourse || !assignCourseId"
+            @click="handleAssignCourse"
+          >
+            {{ assigningCourse ? 'Assigning…' : '+ Assign course' }}
+          </button>
+        </div>
+        <p
+          v-if="assignMessage"
+          class="hint"
+          style="margin-top: 8px; margin-bottom: 0"
+          :style="{ color: assignMessage.ok ? 'var(--teal)' : 'var(--danger)' }"
+        >
+          {{ assignMessage.text }}
+        </p>
+      </div>
+
+      <div v-if="!enrolments.length" class="sub" style="padding: 18px">
+        No courses assigned yet. Pick a course above to assign it to {{ employee.full_name }}.
+      </div>
+      <div v-else class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Course</th>
+              <th>Status</th>
+              <th>Progress</th>
+              <th>Deadline</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="e in enrolments" :key="e.id">
+              <td>
+                <RouterLink
+                  :to="`/admin/courses/${e.course_id}`"
+                  style="font-weight: 600; text-decoration: none; color: var(--ink)"
+                >
+                  {{ coursesById.get(e.course_id)?.title ?? `Course #${e.course_id}` }}
+                </RouterLink>
+                <div class="sub">
+                  {{ coursesById.get(e.course_id)?.category ?? '—' }}
+                  <template v-if="e.assigned_by"> · Assigned by admin</template>
+                </div>
+              </td>
+              <td>
+                <span
+                  :class="[
+                    'pill',
+                    e.status === 'completed'
+                      ? 'pill-teal'
+                      : e.status === 'overdue'
+                        ? 'pill-danger'
+                        : e.status === 'in_progress'
+                          ? 'pill-brass'
+                          : 'pill-muted',
+                  ]"
+                >
+                  {{ e.status.replace('_', ' ') }}
+                </span>
+              </td>
+              <td class="tabular">{{ e.progress_pct }}%</td>
+              <td>
+                <div class="row" style="gap: 6px">
+                  <input
+                    v-model="editingEnrolmentDeadlines[e.id]"
+                    type="date"
+                    style="width: 145px"
+                  />
+                  <button
+                    class="btn btn-ghost btn-sm"
+                    :disabled="busyEnrolmentId === e.id"
+                    @click="handleSaveEnrolmentDeadline(e)"
+                  >
+                    Save
+                  </button>
+                </div>
+              </td>
+              <td>
+                <button
+                  class="btn btn-ghost btn-sm"
+                  style="color: var(--danger)"
+                  :disabled="busyEnrolmentId === e.id"
+                  @click="handleUnassignCourse(e)"
+                >
+                  Unassign
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 20px">
+      <div class="panel-title">
+        <h3>Milestone &amp; Badge Eligibility</h3>
+        <div class="row wrap" style="gap: 8px">
+          <RouterLink class="btn btn-ghost btn-sm" to="/admin/certificates">Issue certificate &rarr;</RouterLink>
+          <RouterLink class="btn btn-ghost btn-sm" to="/admin/badges?tab=custom">Award badge &rarr;</RouterLink>
+          <RouterLink class="btn btn-ghost btn-sm" to="/admin/badges">Configure rules &rarr;</RouterLink>
+        </div>
+      </div>
+      <div style="padding: 8px 18px 14px; font-size: 13px; color: var(--ink-soft); font-variant-numeric: tabular-nums">
+        Coursework completed: <b style="color: var(--ink)">{{ formatDurationMinutes(badgeSummary.metrics.completedCourseDurationMinutes) }}</b>
+        · Courses completed: <b style="color: var(--ink)">{{ badgeSummary.metrics.coursesCompleted }}</b>
+        · Certificates earned: <b style="color: var(--ink)">{{ badgeSummary.metrics.certificatesEarned }}</b>
+        <template v-if="employeeBadgeAwards.length">
+          · Custom badges: <b style="color: var(--ink)">{{ employeeBadgeAwards.length }}</b>
+        </template>
+      </div>
+      <div v-if="employeeBadgeAwards.length" style="padding: 0 18px 12px; font-size: 12.5px; color: var(--teal); font-weight: 600">
+        Direct awards:
+        {{
+          employeeBadgeAwards
+            .map((aw) => `${customBadgesById.get(aw.badgeId)?.icon ?? '🏅'} ${customBadgesById.get(aw.badgeId)?.name ?? 'Badge'}`)
+            .join(', ')
+        }}
+      </div>
+      <div v-if="employeeIssuedCerts.length" style="padding: 0 18px 12px; font-size: 12.5px; color: var(--ink-soft)">
+        Issued certificates:
+        <b style="color: var(--ink)">{{ employeeIssuedCerts.map((c) => c.title).join(', ') }}</b>
+      </div>
+      <div v-for="ev in badgeSummary.evaluations" :key="ev.badge.id" class="row-item" style="cursor: default">
+        <div style="font-size: 20px; width: 28px; text-align: center">{{ ev.badge.icon }}</div>
+        <div class="row-info">
+          <div class="t">{{ ev.badge.name }}</div>
+          <div class="m" style="font-variant-numeric: tabular-nums">{{ ev.summaryHint }}</div>
+        </div>
+        <span :style="{ fontWeight: 700, fontSize: '12px', color: ev.eligible ? 'var(--teal)' : 'var(--ink-soft)', fontVariantNumeric: 'tabular-nums' }">
+          {{ ev.eligible ? 'Eligible · Unlocked' : `${ev.overallPct}%` }}
+        </span>
+      </div>
     </div>
 
     <div class="card">

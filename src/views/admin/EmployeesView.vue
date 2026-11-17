@@ -6,7 +6,7 @@ import { logActivity } from '@/lib/activity'
 import { parseEmployeeCsv, type ParsedEmployeeRow } from '@/lib/csv'
 import { loadDepartments } from '@/lib/departments'
 import { useSort } from '@/composables/useSort'
-import { manageEmployee, isActive, initialsOf } from '@/lib/employees'
+import { manageEmployee, bulkInviteEmployees, isActive, initialsOf } from '@/lib/employees'
 import type { Profile, Department } from '@/lib/database.types'
 
 const auth = useAuthStore()
@@ -14,8 +14,12 @@ const employees = ref<Profile[]>([])
 const today = new Date().toISOString().slice(0, 10)
 
 const csvPreview = ref<ParsedEmployeeRow[]>([])
+const csvError = ref('')
 const importing = ref(false)
-const importResults = ref<{ email: string; success: boolean; error?: string }[]>([])
+const retryingFailed = ref(false)
+const importProgress = ref<{ done: number; total: number }>({ done: 0, total: 0 })
+const importResults = ref<{ email: string; success: boolean; provider?: string; error?: string }[]>([])
+const lastImportedRows = ref<ParsedEmployeeRow[]>([])
 
 const departments = ref<Department[]>([])
 const showInactive = ref(false)
@@ -64,8 +68,8 @@ async function addEmployee() {
     addMessage.value = { ok: false, text: result.error }
     return
   }
-  await logActivity(auth.profile?.id, `Added ${newName.value.trim()} as ${newRole.value} (${newDepartment.value}) and sent an invite`)
-  addMessage.value = { ok: true, text: `Invite sent to ${newEmail.value.trim()} - they will set their own password.` }
+  await logActivity(auth.profile?.id, `Added ${newName.value.trim()} as ${newRole.value} (${newDepartment.value}) and sent an invite via Resend`)
+  addMessage.value = { ok: true, text: `Invite email sent via Resend to ${newEmail.value.trim()} — they can open the link to access Captain LMS.` }
   newName.value = ''
   newEmail.value = ''
   newRole.value = 'employee'
@@ -117,39 +121,88 @@ function isOverdue(e: Profile) {
 }
 
 function onCsvSelected(e: Event) {
-  const file = (e.target as HTMLInputElement).files?.[0]
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
   if (!file) return
   importResults.value = []
+  lastImportedRows.value = []
+  csvError.value = ''
   file.text().then((text) => {
-    csvPreview.value = parseEmployeeCsv(text)
+    const parsed = parseEmployeeCsv(text)
+    csvPreview.value = parsed
+    if (!parsed.length) {
+      csvError.value = 'No valid employee rows found. Make sure the CSV has Name, Email, Department headers and at least one valid email row.'
+    }
   })
 }
 
+const failedRetryRows = computed(() => {
+  const failedEmails = new Set(
+    importResults.value.filter((r) => !r.success && r.email).map((r) => r.email.trim().toLowerCase()),
+  )
+  return lastImportedRows.value.filter((r) => failedEmails.has(r.email.trim().toLowerCase()))
+})
+
 async function runImport() {
-  if (!csvPreview.value.length) return
+  if (!csvPreview.value.length || importing.value || retryingFailed.value) return
+  const rowsToInvite = [...csvPreview.value]
   importing.value = true
   importResults.value = []
-  const { data: sessionData } = await supabase.auth.getSession()
-  const token = sessionData.session?.access_token
-  try {
-    const res = await fetch('/.netlify/functions/admin-invite-employees', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: JSON.stringify({ rows: csvPreview.value }),
-    })
-    const body = await res.json()
-    if (!res.ok) {
-      importResults.value = [{ email: '', success: false, error: body.error ?? 'Import failed' }]
-    } else {
-      importResults.value = body.results
-      const successCount = body.results.filter((r: { success: boolean }) => r.success).length
-      await logActivity(auth.profile?.id, `Bulk-invited ${successCount} of ${csvPreview.value.length} employees via CSV import`)
-    }
-  } catch {
-    importResults.value = [{ email: '', success: false, error: 'Could not reach the invite service.' }]
+  csvError.value = ''
+  lastImportedRows.value = rowsToInvite
+  importProgress.value = { done: 0, total: rowsToInvite.length }
+
+  const { results, error } = await bulkInviteEmployees(rowsToInvite, (done, total) => {
+    importProgress.value = { done, total }
+  })
+  importResults.value = results
+  if (error) {
+    csvError.value = error
   }
-  csvPreview.value = []
+
+  const successCount = results.filter((r) => r.success).length
+  if (successCount > 0) {
+    await logActivity(auth.profile?.id, `Bulk-invited ${successCount} of ${rowsToInvite.length} employees via Resend CSV import`)
+    await loadEmployees()
+  }
+  if (results.length > 0) {
+    csvPreview.value = []
+  }
   importing.value = false
+}
+
+async function retryFailedImport() {
+  const rowsToRetry = [...failedRetryRows.value]
+  if (!rowsToRetry.length || importing.value || retryingFailed.value) return
+
+  retryingFailed.value = true
+  csvError.value = ''
+  importProgress.value = { done: 0, total: rowsToRetry.length }
+
+  const { results: retryResults, error } = await bulkInviteEmployees(rowsToRetry, (done, total) => {
+    importProgress.value = { done, total }
+  })
+
+  if (error) {
+    csvError.value = error
+  }
+
+  const retryMap = new Map(retryResults.map((r) => [r.email.trim().toLowerCase(), r]))
+  importResults.value = importResults.value.map((prev) => {
+    const updated = retryMap.get(prev.email.trim().toLowerCase())
+    return updated ?? prev
+  })
+
+  const retriedSuccessCount = retryResults.filter((r) => r.success).length
+  if (retriedSuccessCount > 0) {
+    await logActivity(
+      auth.profile?.id,
+      `Retried failed invites: invited ${retriedSuccessCount} of ${rowsToRetry.length} employees via Resend`,
+    )
+    await loadEmployees()
+  }
+
+  retryingFailed.value = false
 }
 </script>
 
@@ -188,13 +241,14 @@ async function runImport() {
       </p>
     </div>
 
-    <div class="card" style="padding: 18px; margin-bottom: 20px; max-width: 520px">
+    <div class="card" style="padding: 18px; margin-bottom: 20px; max-width: 560px">
       <div class="panel-title"><h3>Bulk import (CSV)</h3></div>
       <p class="hint" style="margin-bottom: 8px">
-        A CSV with <code>Name, Email, Department</code> columns (header row required). Each row gets a Supabase invite
-        email to set their own password.
+        Upload a CSV with <code>Name, Email, Department</code> columns (header row required). Invitations are sent in
+        batches via Resend so bulk imports are not limited by Supabase's 2/hour email cap.
       </p>
       <input type="file" accept=".csv,text/csv" @change="onCsvSelected" />
+      <p v-if="csvError" class="hint" style="color: var(--danger); margin-top: 8px">{{ csvError }}</p>
 
       <div v-if="csvPreview.length" style="margin-top: 12px">
         <p class="hint">{{ csvPreview.length }} row(s) parsed:</p>
@@ -202,15 +256,32 @@ async function runImport() {
           {{ r.full_name }} — {{ r.email }} — {{ r.department }}
         </div>
         <p v-if="csvPreview.length > 10" class="hint">…and {{ csvPreview.length - 10 }} more</p>
-        <button class="btn btn-primary btn-sm" style="margin-top: 8px" :disabled="importing" @click="runImport">
-          {{ importing ? 'Inviting…' : `Invite ${csvPreview.length} employee(s)` }}
+        <button class="btn btn-primary btn-sm" style="margin-top: 8px" :disabled="importing || retryingFailed" @click="runImport">
+          {{ importing ? `Inviting ${importProgress.done} / ${importProgress.total}…` : `Invite ${csvPreview.length} employee(s)` }}
         </button>
       </div>
 
       <div v-if="importResults.length" style="margin-top: 12px">
+        <p class="hint" style="margin-bottom: 6px">
+          {{ importResults.filter((r) => r.success).length }} invited ·
+          {{ importResults.filter((r) => !r.success).length }} failed
+        </p>
         <div v-for="(r, i) in importResults" :key="i" style="font-size: 12.5px" :style="{ color: r.success ? 'var(--teal)' : 'var(--danger)' }">
-          {{ r.email || 'Import' }} — {{ r.success ? 'Invited' : r.error }}
+          {{ r.email || 'Import' }} — {{ r.success ? `Invited${r.provider ? ` (${r.provider})` : ''}` : r.error }}
         </div>
+        <button
+          v-if="failedRetryRows.length > 0"
+          class="btn btn-ghost btn-sm"
+          style="margin-top: 10px"
+          :disabled="importing || retryingFailed"
+          @click="retryFailedImport"
+        >
+          {{
+            retryingFailed
+              ? `Retrying ${importProgress.done} / ${importProgress.total}…`
+              : `Retry Failed Invites (${failedRetryRows.length})`
+          }}
+        </button>
       </div>
     </div>
 

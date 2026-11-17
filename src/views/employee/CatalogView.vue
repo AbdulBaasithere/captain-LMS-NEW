@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import {
   COURSE_DIFFICULTIES,
-  loadCourses,
   courseProgress,
   courseCode,
   filterCatalogCourses,
@@ -13,34 +12,39 @@ import {
   type CourseVM,
   type CourseProgress,
 } from '@/lib/courses'
+import { loadEmployeeCoursesAndEnrolments } from '@/lib/courseAssignments'
 import CertificateModal from '@/components/CertificateModal.vue'
 import { buildCertificateData, type CertificateData } from '@/lib/certificate'
-import type { CourseDifficulty, Module, VideoCompletion } from '@/lib/database.types'
+import type { CourseDifficulty, CourseEnrolment, VideoCompletion } from '@/lib/database.types'
 
 export interface CourseWithProgress extends CourseVM {
   progress: CourseProgress
+  enrolment?: CourseEnrolment
 }
 
 const auth = useAuthStore()
 const router = useRouter()
 const courses = ref<CourseVM[]>([])
 const completions = ref<VideoCompletion[]>([])
+const enrolmentByCourseId = ref<Map<number, CourseEnrolment>>(new Map())
 const loading = ref(true)
 const search = ref('')
 const category = ref('All')
 const difficulty = ref<'All' | CourseDifficulty>('All')
 const statusFilter = ref<'All' | 'In progress' | 'Completed' | 'Not started'>('All')
+const assignedOnly = ref(false)
 
 onMounted(async () => {
   const dept = auth.profile?.department
   const userId = auth.profile?.id
   if (!dept || !userId) return
-  const [{ data: mods }, { data: comps }] = await Promise.all([
-    supabase.from('modules').select('*').or(`department.eq.General,department.eq.${dept}`).order('id'),
+  const [assignedData, { data: comps }] = await Promise.all([
+    loadEmployeeCoursesAndEnrolments(userId, dept),
     supabase.from('video_completions').select('*').eq('user_id', userId),
   ])
   completions.value = (comps ?? []) as VideoCompletion[]
-  courses.value = (await loadCourses((mods ?? []) as Module[])).filter((c) => c.lessons.length > 0)
+  courses.value = assignedData.courses
+  enrolmentByCourseId.value = assignedData.enrolmentByCourseId
   loading.value = false
 })
 
@@ -50,8 +54,13 @@ const coursesWithProgress = computed<CourseWithProgress[]>(() => {
   return courses.value.map((c) => ({
     ...c,
     progress: courseProgress(c, completions.value),
+    enrolment: c.dbId ? enrolmentByCourseId.value.get(c.dbId) : undefined,
   }))
 })
+
+const assignedCount = computed(() =>
+  coursesWithProgress.value.filter((c) => Boolean(c.enrolment?.assigned_by)).length,
+)
 
 const summaryStats = computed(() => {
   const total = coursesWithProgress.value.length
@@ -73,21 +82,23 @@ const difficultyCounts = computed<Record<'All' | CourseDifficulty, number>>(() =
   return counts
 })
 
-const shown = computed(() =>
-  filterCatalogCourses(coursesWithProgress.value, {
+const shown = computed(() => {
+  const base = filterCatalogCourses(coursesWithProgress.value, {
     search: search.value,
     category: category.value,
     difficulty: difficulty.value,
     status: statusFilter.value,
-  }),
-)
+  })
+  return assignedOnly.value ? base.filter((c) => Boolean(c.enrolment?.assigned_by)) : base
+})
 
 const hasActiveFilters = computed(
   () =>
     search.value.trim().length > 0 ||
     category.value !== 'All' ||
     difficulty.value !== 'All' ||
-    statusFilter.value !== 'All',
+    statusFilter.value !== 'All' ||
+    assignedOnly.value,
 )
 
 function resetFilters() {
@@ -95,6 +106,7 @@ function resetFilters() {
   category.value = 'All'
   difficulty.value = 'All'
   statusFilter.value = 'All'
+  assignedOnly.value = false
 }
 
 function difficultyClass(level: CourseDifficulty): string {
@@ -215,6 +227,15 @@ function open(c: CourseWithProgress) {
             >
               {{ s }}
             </button>
+            <button
+              v-if="assignedCount > 0"
+              type="button"
+              class="chip-btn status-filter-btn"
+              :class="{ on: assignedOnly }"
+              @click="assignedOnly = !assignedOnly"
+            >
+              Assigned to me ({{ assignedCount }})
+            </button>
           </div>
         </div>
       </div>
@@ -264,6 +285,8 @@ function open(c: CourseWithProgress) {
           </div>
           <div class="meta">
             <span class="difficulty-badge" :class="difficultyClass(c.difficulty)">{{ c.difficulty }}</span>
+            <span v-if="c.enrolment?.assigned_by" style="color: var(--blue); font-weight: 700">Assigned</span>
+            <span v-if="c.enrolment?.deadline_date" style="color: var(--ink-soft)">Due {{ c.enrolment.deadline_date }}</span>
             <span>▶ {{ c.progress.videos }} video{{ c.progress.videos === 1 ? '' : 's' }}</span>
             <span>📄 {{ c.progress.docs }} doc{{ c.progress.docs === 1 ? '' : 's' }}</span>
             <span>{{ formatCourseTime(c.progress.minutes) }}</span>

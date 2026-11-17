@@ -4,12 +4,14 @@ import { useRouter } from 'vue-router'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import { materialType, formatDuration, hasAnyVideo, hydrateModulesUploadedVideos } from '@/lib/materials'
+import { loadEmployeeCoursesAndEnrolments } from '@/lib/courseAssignments'
 import { useSort } from '@/composables/useSort'
 import type { Module, VideoCompletion } from '@/lib/database.types'
 
 const auth = useAuthStore()
 const router = useRouter()
 const modules = ref<Module[]>([])
+const assignedCourseIds = ref<Set<number>>(new Set())
 const completions = ref<VideoCompletion[]>([])
 const audienceFilter = ref('All')
 
@@ -17,11 +19,14 @@ onMounted(async () => {
   const dept = auth.profile?.department
   const userId = auth.profile?.id
   if (!dept || !userId) return
-  const [{ data: modData }, { data: compData }] = await Promise.all([
-    supabase.from('modules').select('*').or(`department.eq.General,department.eq.${dept}`).order('id'),
+  const [assignedData, { data: compData }] = await Promise.all([
+    loadEmployeeCoursesAndEnrolments(userId, dept),
     supabase.from('video_completions').select('*').eq('user_id', userId),
   ])
-  modules.value = await hydrateModulesUploadedVideos((modData ?? []) as Module[])
+  assignedCourseIds.value = new Set(
+    assignedData.enrolments.filter((e) => e.assigned_by !== null).map((e) => e.course_id),
+  )
+  modules.value = await hydrateModulesUploadedVideos(assignedData.modules)
   completions.value = compData ?? []
 })
 
@@ -29,9 +34,22 @@ function isDone(moduleId: number) {
   return completions.value.some((c) => c.module_id === moduleId && c.completed)
 }
 
-const filteredModules = computed(() =>
-  audienceFilter.value === 'All' ? modules.value : modules.value.filter((m) => m.department === audienceFilter.value),
-)
+const availableAudiences = computed(() => {
+  const set = new Set<string>(['General'])
+  if (auth.profile?.department) set.add(auth.profile.department)
+  for (const m of modules.value) {
+    if (m.department) set.add(m.department)
+  }
+  return Array.from(set)
+})
+
+const filteredModules = computed(() => {
+  if (audienceFilter.value === 'All') return modules.value
+  if (audienceFilter.value === 'Assigned') {
+    return modules.value.filter((m) => typeof m.course_id === 'number' && assignedCourseIds.value.has(m.course_id))
+  }
+  return modules.value.filter((m) => m.department === audienceFilter.value)
+})
 
 const { sorted: sortedModules, toggle, indicator, ariaSort } = useSort(filteredModules, {
   title: (m) => m.title,
@@ -47,7 +65,7 @@ const { sorted: sortedModules, toggle, indicator, ariaSort } = useSort(filteredM
     <div class="topline">
       <div>
         <h2>My Modules</h2>
-        <p>General training everyone gets, plus your department's track.</p>
+        <p>General training, your department's track, and any courses assigned to you.</p>
       </div>
     </div>
 
@@ -60,19 +78,21 @@ const { sorted: sortedModules, toggle, indicator, ariaSort } = useSort(filteredM
         All
       </button>
       <button
+        v-if="assignedCourseIds.size > 0"
         class="btn btn-sm"
-        :class="audienceFilter === 'General' ? 'btn-primary' : 'btn-ghost'"
-        @click="audienceFilter = 'General'"
+        :class="audienceFilter === 'Assigned' ? 'btn-primary' : 'btn-ghost'"
+        @click="audienceFilter = 'Assigned'"
       >
-        General
+        Assigned
       </button>
       <button
-        v-if="auth.profile?.department"
+        v-for="aud in availableAudiences"
+        :key="aud"
         class="btn btn-sm"
-        :class="audienceFilter === auth.profile.department ? 'btn-primary' : 'btn-ghost'"
-        @click="audienceFilter = auth.profile!.department"
+        :class="audienceFilter === aud ? 'btn-primary' : 'btn-ghost'"
+        @click="audienceFilter = aud"
       >
-        {{ auth.profile.department }}
+        {{ aud }}
       </button>
     </div>
 
