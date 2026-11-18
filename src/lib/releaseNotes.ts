@@ -8,6 +8,23 @@ export interface ReleaseNote {
 // Newest first. Add a new entry here whenever APP_VERSION is bumped in version.ts.
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: 'v5.0',
+    date: '2026-11-17',
+    title: 'Admin Credentials & Assignments, KPI Analytics, Badge Criteria & Organization Leaderboard',
+    changes: [
+      'Admin side — Certificates (Create, Issue & PDF Templates): Added a Create & Issue Certificates tab alongside Template & PDF Settings (classic styling and custom uploaded PDF template alignment tool). Admins can issue official certificates to one or multiple employees with optional course links, credit hours, citations, PDF preview/download, and revocation.',
+      'Admin side — Badges & Milestone Criteria: Added Milestone Eligibility Rules (based on completed course duration, courses completed, and certificates earned with All/Any matching) plus Custom Recognition Badges that admins can create, directly award to employees with citation notes, and revoke.',
+      'Admin side — Course Assignments & Deadlines: Added multi-employee Assign buttons in Courses, an Assigned Employees management table in the Course Editor, and an Assigned Courses panel in Employee Detail profiles to assign courses across departments, update deadlines, and unassign learners.',
+      'Admin side — Audiences & Automatic Course Colours: Added colour management directly inside Audiences (new audiences automatically receive an unused palette colour) and removed manual colour selection from Courses so courses inherit their audience colour automatically.',
+      'Admin side — Bulk Employee Import via Resend & Retry: Switched employee invite delivery to Resend (removing Supabase 2-email/hour bulk import limits), improved invite endpoint diagnostics and retry handling, and added a Retry Failed Invites button to re-trigger invitations only for failed CSV rows.',
+      'Admin side — KPI Analytics, Monitoring & Uploaded Videos: Added interactive Recharts KPI dashboards (completion trends, compliance distribution, quiz performance, and active user trends) with date-range and department filtering, a Monitoring & Alerts workspace for inactivity/deadline emails and HR/Manager CC contacts, and direct video file uploads on lessons.',
+      'Admin & HR Portals — HR Portal & Organization Leaderboard: Added read-only HR routes (/hr/overview KPI analytics and /hr/compliance alerts) and launched the Organization Leaderboard (/admin/leaderboard, /hr/leaderboard, /manager/leaderboard, /app/leaderboard) ranking active learners by badges, course completions, and recent activity.',
+      'Employee side — Certificates & Badges Hub: Added a metrics summary strip (course duration, courses completed, total certificates), Milestone & Achievement Badges with per-criterion progress bars and All/Unlocked/In-progress filters, Special Recognition Badges with admin citations, Awarded Certificates with PDF download/preview, and hover/focus tooltips on Milestone Quiz Badges showing unlock steps (when locked) or passing score/attempt/date (when unlocked).',
+      'Employee side — Assigned Courses & Cross-Department Access: Updated Dashboard, Course Catalog, My Modules, and the Lesson Player to load courses and lessons explicitly assigned by an admin across departments, display Assigned and Due date tags, and provide an Assigned to me filter.',
+      'Employee side — Organization Leaderboard Upgrade: Upgraded /app/leaderboard to show personal standing, 7d / 30d / All-time period filters, department filter, search, transparent Scoring Guide breakdown, and expandable learner breakdown details.',
+    ],
+  },
+  {
     version: 'v4.3',
     date: '2026-10-15',
     title: 'Revamp phase 5: admin analytics and manager team views',
