@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import VersionTag from '@/components/VersionTag.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import { initialsOf } from '@/lib/employees'
 import { useWidgetsStore } from '@/stores/widgets'
 
@@ -29,7 +30,7 @@ const links = computed(() => allLinks.filter((l) => !('widget' in l) || widgets.
 <template>
   <div class="shell active">
     <aside class="rail">
-      <div class="brandmark"><span class="mark">C</span><span>Captain LMS · Manager</span></div>
+      <BrandLogo size="md" subtitle="LMS · Manager" />
       <RouterLink v-for="l in links" :key="l.to" :to="l.to" class="navlink"
         ><span>{{ l.icon }}</span> {{ l.label }}</RouterLink
       >
@@ -51,7 +52,7 @@ const links = computed(() => allLinks.filter((l) => !('widget' in l) || widgets.
 
     <div class="main">
       <div class="mobile-topbar">
-        <div class="brandmark"><span class="mark">C</span><span>Captain LMS</span></div>
+        <BrandLogo size="sm" subtitle="LMS · Manager" />
         <div style="display: flex; align-items: center; gap: 4px">
           <ThemeToggle variant="icon" />
           <button class="theme-cycle-btn" style="color: #fca5a5" title="Sign out" @click="logout">⏻</button>

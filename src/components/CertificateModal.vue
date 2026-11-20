@@ -175,6 +175,11 @@ async function copyCertId() {
               <span class="cert-corner corner-bl">◆</span>
               <span class="cert-corner corner-br">◆</span>
 
+              <img
+                src="/assets/aistudio/captain-logo_d6af1701.png"
+                alt="Captain — We create bonds"
+                class="cert-brand-logo"
+              />
               <div class="cert-brand-line">{{ activeConfig.organizationName }}</div>
               <div class="cert-main-kicker">{{ activeConfig.certificateTitle }}</div>
               <div class="cert-sub-kicker">{{ activeConfig.presentationKicker }}</div>
@@ -473,6 +478,14 @@ async function copyCertId() {
 .corner-tr { top: 4px; right: 4px; }
 .corner-bl { bottom: 4px; left: 4px; }
 .corner-br { bottom: 4px; right: 4px; }
+
+.cert-brand-logo {
+  display: block;
+  height: 28px;
+  width: auto;
+  margin: 0 auto 6px;
+  object-fit: contain;
+}
 
 .cert-brand-line {
   font-size: 9px;

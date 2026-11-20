@@ -6,6 +6,7 @@ import { loadTrackData, pendingMilestones } from '@/lib/quiz'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import NotificationsBell from '@/components/NotificationsBell.vue'
 import VersionTag from '@/components/VersionTag.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 import WeeklyGoal from '@/components/WeeklyGoal.vue'
 import { useWidgetsStore } from '@/stores/widgets'
 import { initialsOf } from '@/lib/employees'
@@ -45,7 +46,7 @@ const initials = () => initialsOf(auth.profile?.full_name)
 <template>
   <div class="shell active">
     <aside class="rail">
-      <div class="brandmark"><span class="mark">C</span><span>Captain LMS</span></div>
+      <BrandLogo size="md" subtitle="LMS" />
       <RouterLink v-for="l in links" :key="l.to" :to="l.to" class="navlink" style="position: relative"
         ><span>{{ l.icon }}</span> {{ l.label }}
         <span v-if="l.dot && hasPendingQuiz" class="navlink-dot"></span
@@ -72,7 +73,7 @@ const initials = () => initialsOf(auth.profile?.full_name)
 
     <div class="main">
       <div class="mobile-topbar">
-        <div class="brandmark"><span class="mark">C</span><span>Captain LMS</span></div>
+        <BrandLogo size="sm" subtitle="LMS" />
         <div style="display: flex; align-items: center; gap: 4px">
           <ThemeToggle variant="icon" />
           <NotificationsBell variant="icon" />

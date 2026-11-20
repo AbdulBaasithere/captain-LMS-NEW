@@ -6,6 +6,7 @@ import { supabaseConfigured, hasSecretKeyInClient } from '@/lib/supabase'
 import { loadDepartments } from '@/lib/departments'
 import ThemeToggle from '@/components/ThemeToggle.vue'
 import VersionBadge from '@/components/VersionBadge.vue'
+import BrandLogo from '@/components/BrandLogo.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
@@ -70,7 +71,7 @@ async function submit() {
 
     <div class="auth-card">
       <div class="auth-visual">
-        <div class="brandmark"><span class="mark">C</span><span style="color: #fff">Captain LMS</span></div>
+        <BrandLogo size="lg" subtitle="LMS" />
         <blockquote>
           &ldquo;Everyone used to sit through the same videos, whether it applied to them or not. Now each team
           sees their own training, and nothing else.&rdquo;
@@ -181,7 +182,7 @@ async function submit() {
   .auth-visual {
     padding: 20px 24px;
   }
-  .auth-visual .brandmark {
+  .auth-visual .brand-logo {
     padding: 0;
   }
   .auth-visual blockquote,

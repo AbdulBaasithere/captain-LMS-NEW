@@ -96,7 +96,12 @@ async function downloadPdf() {
         <p class="cert-body">and earned the</p>
         <div class="cert-badge-name">{{ BADGE_NAMES[milestone] }} Badge</div>
         <div class="cert-date">{{ earnedAt ? formattedDate(earnedAt) : '' }}</div>
-        <div class="cert-brand">CAPTAIN LMS</div>
+        <div class="cert-brand-wrap">
+          <div class="cert-logo-badge">
+            <img src="/assets/aistudio/captain-logo_d6af1701.png" alt="Captain — We create bonds" />
+          </div>
+          <div class="cert-brand">CAPTAIN LMS</div>
+        </div>
       </div>
     </div>
   </div>
@@ -154,6 +159,27 @@ async function downloadPdf() {
   color: var(--ink-soft);
   font-size: 13px;
   margin-bottom: 24px;
+}
+.cert-brand-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.cert-logo-badge {
+  background: #ffffff;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cert-logo-badge img {
+  height: 28px;
+  width: auto;
+  display: block;
+  object-fit: contain;
 }
 .cert-brand {
   font: 700 13px 'IBM Plex Mono', monospace;
