@@ -551,7 +551,7 @@ function nudgeSelected(dx: number, dy: number) {
   position: fixed;
   inset: 0;
   z-index: 1190;
-  background: rgba(6, 9, 17, 0.85);
+  background: rgba(12, 8, 10, 0.85);
   backdrop-filter: blur(6px);
 }
 
@@ -559,7 +559,7 @@ function nudgeSelected(dx: number, dy: number) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: rgba(15, 23, 42, 0.72);
+  background: rgba(24, 18, 20, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 12px;
   padding: 12px;
@@ -569,8 +569,8 @@ function nudgeSelected(dx: number, dy: number) {
   position: fixed;
   inset: 20px;
   z-index: 1200;
-  background: #0b1120;
-  border: 1px solid rgba(212, 175, 55, 0.45);
+  background: #140f11;
+  border: 1px solid rgba(221, 51, 51, 0.45);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.75);
   padding: 16px 20px;
   overflow: auto;
@@ -596,8 +596,8 @@ function nudgeSelected(dx: number, dy: number) {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #38bdf8;
-  box-shadow: 0 0 8px #38bdf8;
+  background: #dd3333;
+  box-shadow: 0 0 8px #dd3333;
 }
 
 .coords-pill {
@@ -606,7 +606,7 @@ function nudgeSelected(dx: number, dy: number) {
   padding: 2px 7px;
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.08);
-  color: #bae6fd;
+  color: #fecaca;
 }
 
 .aligner-tools {
@@ -651,9 +651,9 @@ function nudgeSelected(dx: number, dy: number) {
 }
 
 .tool-btn.active {
-  background: rgba(37, 99, 235, 0.28);
-  border-color: #3b82f6;
-  color: #93c5fd;
+  background: rgba(221, 51, 51, 0.28);
+  border-color: #dd3333;
+  color: #fecaca;
 }
 
 .expand-btn {
@@ -762,8 +762,8 @@ function nudgeSelected(dx: number, dy: number) {
   inset: 0;
   pointer-events: none;
   background-image:
-    linear-gradient(to right, rgba(37, 99, 235, 0.12) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(37, 99, 235, 0.12) 1px, transparent 1px);
+    linear-gradient(to right, rgba(221, 51, 51, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(221, 51, 51, 0.12) 1px, transparent 1px);
   background-size: 10% 10%;
   z-index: 2;
 }
@@ -774,7 +774,7 @@ function nudgeSelected(dx: number, dy: number) {
   bottom: 0;
   left: 50%;
   width: 1px;
-  border-left: 1px dashed rgba(37, 99, 235, 0.45);
+  border-left: 1px dashed rgba(221, 51, 51, 0.45);
 }
 
 .grid-center-h {
@@ -783,7 +783,7 @@ function nudgeSelected(dx: number, dy: number) {
   right: 0;
   top: 50%;
   height: 1px;
-  border-top: 1px dashed rgba(37, 99, 235, 0.45);
+  border-top: 1px dashed rgba(221, 51, 51, 0.45);
 }
 
 .snap-guide-v {
@@ -791,8 +791,8 @@ function nudgeSelected(dx: number, dy: number) {
   top: 0;
   bottom: 0;
   width: 1px;
-  border-left: 1.5px dashed #0ea5e9;
-  box-shadow: 0 0 6px rgba(14, 165, 233, 0.7);
+  border-left: 1.5px dashed #dd3333;
+  box-shadow: 0 0 6px rgba(221, 51, 51, 0.7);
   pointer-events: none;
   z-index: 4;
 }
@@ -802,8 +802,8 @@ function nudgeSelected(dx: number, dy: number) {
   left: 0;
   right: 0;
   height: 1px;
-  border-top: 1.5px dashed #0ea5e9;
-  box-shadow: 0 0 6px rgba(14, 165, 233, 0.7);
+  border-top: 1.5px dashed #dd3333;
+  box-shadow: 0 0 6px rgba(221, 51, 51, 0.7);
   pointer-events: none;
   z-index: 4;
 }
@@ -816,26 +816,26 @@ function nudgeSelected(dx: number, dy: number) {
   line-height: 1.15;
   padding: 2px 6px;
   border-radius: 4px;
-  border: 1px dashed rgba(14, 165, 233, 0.35);
+  border: 1px dashed rgba(221, 51, 51, 0.35);
   touch-action: none;
   transition: border-color 0.1s ease, background-color 0.1s ease;
 }
 
 .drag-field:hover {
-  border-color: rgba(14, 165, 233, 0.85);
-  background: rgba(14, 165, 233, 0.08);
+  border-color: rgba(221, 51, 51, 0.85);
+  background: rgba(221, 51, 51, 0.08);
 }
 
 .drag-field.selected {
-  border: 1.5px solid #2563eb;
-  background: rgba(37, 99, 235, 0.12);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.22);
+  border: 1.5px solid #dd3333;
+  background: rgba(221, 51, 51, 0.12);
+  box-shadow: 0 0 0 2px rgba(221, 51, 51, 0.22);
   z-index: 6;
 }
 
 .drag-field.dragging {
   cursor: grabbing;
-  background: rgba(37, 99, 235, 0.18);
+  background: rgba(221, 51, 51, 0.18);
   z-index: 8;
 }
 
@@ -848,7 +848,7 @@ function nudgeSelected(dx: number, dy: number) {
   font-size: 9.5px;
   font-weight: 700;
   font-style: normal;
-  background: #1d4ed8;
+  background: #dd3333;
   color: #ffffff;
   padding: 1px 6px;
   border-radius: 4px;
@@ -889,7 +889,7 @@ function nudgeSelected(dx: number, dy: number) {
 }
 
 .nudge-btn:hover {
-  background: rgba(59, 130, 246, 0.35);
-  border-color: #60a5fa;
+  background: rgba(221, 51, 51, 0.35);
+  border-color: #f87171;
 }
 </style>

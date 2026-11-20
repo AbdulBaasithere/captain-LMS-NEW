@@ -78,7 +78,7 @@ const initials = () => initialsOf(auth.profile?.full_name)
           <NotificationsBell variant="icon" />
           <button
             class="theme-cycle-btn"
-            style="color: #e08975"
+            style="color: #fca5a5"
             title="Sign out"
             @click="logout"
           >

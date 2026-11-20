@@ -659,12 +659,12 @@ watch([ccOn, ccLang], applyCaptions)
               >
                 <!-- Max watched ceiling boundary -->
                 <i
-                  style="position: absolute; left: 0; top: 0; bottom: 0; background: rgba(59, 130, 246, 0.35); pointer-events: none"
+                  style="position: absolute; left: 0; top: 0; bottom: 0; background: rgba(221, 51, 51, 0.35); pointer-events: none"
                   :style="{ width: watchedPct + '%' }"
                 />
                 <!-- Current playback position -->
                 <i
-                  style="position: absolute; left: 0; top: 0; bottom: 0; background: #2563eb; pointer-events: none"
+                  style="position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent); pointer-events: none"
                   :style="{ width: currentPct + '%' }"
                 />
               </div>
@@ -712,7 +712,7 @@ watch([ccOn, ccLang], applyCaptions)
         <div
           v-if="progress?.status === 'completed'"
           class="card"
-          style="padding: 16px; margin-bottom: 16px; border: 1px solid rgba(212, 175, 55, 0.4); background: linear-gradient(145deg, rgba(212, 175, 55, 0.12), rgba(15, 23, 42, 0.8))"
+          style="padding: 16px; margin-bottom: 16px; border: 1px solid rgba(212, 175, 55, 0.4); background: linear-gradient(145deg, rgba(212, 175, 55, 0.12), rgba(24, 18, 20, 0.88))"
         >
           <div class="row" style="gap: 10px; align-items: center">
             <span style="font-size: 26px">🏆</span>
@@ -813,7 +813,7 @@ watch([ccOn, ccLang], applyCaptions)
   }
 }
 .back-link {
-  color: var(--blue);
+  color: var(--accent-text);
   font-weight: 700;
   text-decoration: none;
 }
@@ -861,7 +861,8 @@ watch([ccOn, ccLang], applyCaptions)
   color: #fff;
 }
 .quiz-card {
-  background: #0f1b33;
+  background: linear-gradient(155deg, #1b1518, #120f11);
+  border: 1px solid rgba(221, 51, 51, 0.28);
   color: #fff;
   border-radius: 20px;
   padding: 22px;
@@ -874,7 +875,10 @@ watch([ccOn, ccLang], applyCaptions)
 .quiz-btn {
   width: 100%;
   justify-content: center;
-  background: var(--brass);
-  color: #1a1000;
+  background: var(--accent);
+  color: #fff;
+}
+.quiz-btn:hover {
+  background: var(--accent-hover);
 }
 </style>

@@ -83,7 +83,7 @@ function handleClick(n: Notification) {
     >
       <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px">
         <span>{{ n.text }}</span>
-        <span v-if="n.action" style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--brass-strong); flex: none">
+        <span v-if="n.action" style="font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--accent-text); flex: none">
           View →
         </span>
       </div>
@@ -100,7 +100,7 @@ function handleClick(n: Notification) {
   height: 15px;
   padding: 0 3px;
   border-radius: 999px;
-  background: var(--danger);
+  background: var(--accent);
   color: #fff;
   font-size: 10px;
   font-weight: 700;

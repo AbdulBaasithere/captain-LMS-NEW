@@ -1,74 +1,85 @@
-/* ---------- Captain LMS design tokens (revamp: navy sidebar, light content, blue + orange accents) ----------
-   The old brass/teal token names are kept so every existing screen picks up the new palette:
-   --brass* is now the orange accent, --teal* is now green, and --blue* is the new primary colour. */
+/* ---------- Captain LMS design tokens (#d33 crimson theme: charcoal sidebar, crisp neutral surfaces, #dd3333 brand accent) ----------
+   --accent / --blue drive the primary #dd3333 brand fills, while --accent-text ensures AA contrast for links & labels in both light and dark modes. */
 :root {
-  --ink: #0f1a2e;
-  --ink-soft: #55607a;
-  --paper: #f4f5f9;
+  --ink: #181417;
+  --ink-soft: #61575b;
+  --paper: #f7f5f5;
   --surface: #ffffff;
-  --surface-sunken: #eef0f7;
-  --border: #e3e6ef;
-  --blue: #2f5be8;
-  --blue-soft: #e6ecfd;
-  --brass: #f08a24;
-  --brass-strong: #b45f0a;
-  --brass-soft: #fdf0e2;
+  --surface-sunken: #f0ecec;
+  --border: #e5dede;
+  --accent: #dd3333;
+  --accent-hover: #be2222;
+  --accent-text: #b91c1c;
+  --accent-soft: #fdecec;
+  --blue: var(--accent);
+  --blue-soft: var(--accent-soft);
+  --brass: #d97706;
+  --brass-strong: #9a4a06;
+  --brass-soft: #fef3e2;
   --teal: #15803d;
   --teal-soft: #e2f4e8;
-  --danger: #c0392b;
-  --danger-soft: #fbe7e4;
-  --rail: #0f1b33;
-  --rail-active: #2b3d66;
-  --rail-ink: #b9c3dc;
-  --shadow: 0 1px 2px rgba(15, 26, 46, 0.05), 0 8px 28px -14px rgba(15, 26, 46, 0.18);
+  --danger: #991b1b;
+  --danger-soft: #fbe4e6;
+  --rail: #161214;
+  --rail-active: #dd3333;
+  --rail-ink: #c6bdc1;
+  --shadow: 0 1px 2px rgba(24, 20, 23, 0.05), 0 8px 28px -14px rgba(24, 20, 23, 0.16);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --ink: #eef1fa;
-    --ink-soft: #9aa6c4;
-    --paper: #0b1020;
-    --surface: #141b30;
-    --surface-sunken: #1a2340;
-    --border: #26304f;
-    --blue: #6b8cff;
-    --blue-soft: #1b2750;
-    --brass: #f5a04a;
-    --brass-strong: #f5a04a;
-    --brass-soft: #3a2a17;
+    --ink: #f6f2f3;
+    --ink-soft: #ada2a7;
+    --paper: #110e10;
+    --surface: #1a1518;
+    --surface-sunken: #241d21;
+    --border: #362c31;
+    --accent: #dd3333;
+    --accent-hover: #e44646;
+    --accent-text: #f87171;
+    --accent-soft: #3a1a1d;
+    --blue: var(--accent);
+    --blue-soft: var(--accent-soft);
+    --brass: #f59e0b;
+    --brass-strong: #fbbf24;
+    --brass-soft: #3a2714;
     --teal: #4ade80;
     --teal-soft: #12301f;
-    --danger: #f08074;
-    --danger-soft: #3a1f1c;
-    --rail: #080d1b;
-    --rail-active: #1f2c52;
-    --rail-ink: #9aa6c4;
-    --shadow: 0 8px 28px -14px rgba(0, 0, 0, 0.6);
+    --danger: #fca5a5;
+    --danger-soft: #43181d;
+    --rail: #0d0a0c;
+    --rail-active: #dd3333;
+    --rail-ink: #b2a7ac;
+    --shadow: 0 8px 28px -14px rgba(0, 0, 0, 0.65);
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --ink: #eef1fa;
-  --ink-soft: #9aa6c4;
-  --paper: #0b1020;
-  --surface: #141b30;
-  --surface-sunken: #1a2340;
-  --border: #26304f;
-  --blue: #6b8cff;
-  --blue-soft: #1b2750;
-  --brass: #f5a04a;
-  --brass-strong: #f5a04a;
-  --brass-soft: #3a2a17;
+  --ink: #f6f2f3;
+  --ink-soft: #ada2a7;
+  --paper: #110e10;
+  --surface: #1a1518;
+  --surface-sunken: #241d21;
+  --border: #362c31;
+  --accent: #dd3333;
+  --accent-hover: #e44646;
+  --accent-text: #f87171;
+  --accent-soft: #3a1a1d;
+  --blue: var(--accent);
+  --blue-soft: var(--accent-soft);
+  --brass: #f59e0b;
+  --brass-strong: #fbbf24;
+  --brass-soft: #3a2714;
   --teal: #4ade80;
   --teal-soft: #12301f;
-  --danger: #f08074;
-  --danger-soft: #3a1f1c;
-  --rail: #080d1b;
-  --rail-active: #1f2c52;
-  --rail-ink: #9aa6c4;
-  --shadow: 0 8px 28px -14px rgba(0, 0, 0, 0.6);
+  --danger: #fca5a5;
+  --danger-soft: #43181d;
+  --rail: #0d0a0c;
+  --rail-active: #dd3333;
+  --rail-ink: #b2a7ac;
+  --shadow: 0 8px 28px -14px rgba(0, 0, 0, 0.65);
   color-scheme: dark;
 }
 

@@ -285,7 +285,7 @@ function open(c: CourseWithProgress) {
           </div>
           <div class="meta">
             <span class="difficulty-badge" :class="difficultyClass(c.difficulty)">{{ c.difficulty }}</span>
-            <span v-if="c.enrolment?.assigned_by" style="color: var(--blue); font-weight: 700">Assigned</span>
+            <span v-if="c.enrolment?.assigned_by" style="color: var(--accent-text); font-weight: 700">Assigned</span>
             <span v-if="c.enrolment?.deadline_date" style="color: var(--ink-soft)">Due {{ c.enrolment.deadline_date }}</span>
             <span>▶ {{ c.progress.videos }} video{{ c.progress.videos === 1 ? '' : 's' }}</span>
             <span>📄 {{ c.progress.docs }} doc{{ c.progress.docs === 1 ? '' : 's' }}</span>
@@ -401,12 +401,12 @@ function open(c: CourseWithProgress) {
   color: #047857;
 }
 .summary-chip.active {
-  border-color: rgba(47, 91, 232, 0.35);
-  background: rgba(47, 91, 232, 0.08);
-  color: var(--blue);
+  border-color: rgba(221, 51, 51, 0.35);
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 .summary-chip.active b {
-  color: var(--blue);
+  color: var(--accent-text);
 }
 
 .filters-container {
@@ -706,7 +706,7 @@ function open(c: CourseWithProgress) {
   font-weight: 700;
 }
 .footer-note.continue {
-  color: var(--blue);
+  color: var(--accent-text);
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;

@@ -1167,7 +1167,7 @@ const statusOptions: Array<'All' | ComplianceStatus> = ['All', 'Compliant', 'In 
   color: var(--ink);
 }
 .emp-link:hover {
-  color: var(--blue);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 .course-dot {
@@ -1194,7 +1194,7 @@ const statusOptions: Array<'All' | ComplianceStatus> = ['All', 'Compliant', 'In 
   color: var(--teal);
 }
 .st-blue {
-  color: var(--blue);
+  color: var(--accent-text);
 }
 .st-warn {
   color: var(--brass-strong);

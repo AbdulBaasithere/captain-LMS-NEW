@@ -396,11 +396,11 @@ async function deleteCourse(c: Course) {
   height: 12px;
   border-radius: 4px;
   flex: none;
-  border: 1px solid rgba(15, 26, 46, 0.16);
+  border: 1px solid var(--border);
 }
 .aud-settings-link {
   margin-left: auto;
-  color: var(--blue);
+  color: var(--accent-text);
   font-weight: 600;
   text-decoration: none;
 }
@@ -426,7 +426,7 @@ async function deleteCourse(c: Course) {
   border-bottom: none;
 }
 .assign-emp-item.selected {
-  background: rgba(59, 130, 246, 0.1);
+  background: var(--accent-soft);
 }
 .assign-emp-item input[type='checkbox'] {
   width: 16px;

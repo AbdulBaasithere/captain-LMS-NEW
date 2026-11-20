@@ -15,7 +15,7 @@ const y = (v: number) => PT + (1 - v / 100) * (H - PT - PB)
 const shown = computed(() => props.rows.slice(0, 6))
 const groupW = computed(() => (W - PL - 10) / Math.max(1, shown.value.length))
 const BAR_W = 26
-const COLORS = ['var(--blue)', '#0f7f6c', 'var(--teal)']
+const COLORS = ['var(--accent)', '#0f7f6c', 'var(--teal)']
 
 function pct(part: number, whole: number) {
   return whole ? Math.round((part / whole) * 100) : 0
@@ -74,7 +74,7 @@ const C2 = 2 * Math.PI * R2
         </g>
       </svg>
       <div class="row" style="gap: 16px; justify-content: center; flex-wrap: wrap">
-        <span class="sub"><b style="color: var(--blue)">■</b> Started (100%)</span>
+        <span class="sub"><b style="color: var(--accent-text)">■</b> Started (100%)</span>
         <span class="sub"><b style="color: #0f7f6c">■</b> Completed</span>
         <span class="sub"><b style="color: var(--teal)">■</b> Passed a quiz</span>
       </div>

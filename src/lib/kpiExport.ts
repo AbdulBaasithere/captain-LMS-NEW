@@ -253,15 +253,16 @@ async function svgElementToPngDataUrl(svgEl: SVGSVGElement): Promise<{ dataUrl: 
     const cs = getComputedStyle(document.documentElement)
     const resolveVars = (raw: string) =>
       raw
-        .replace(/var\(--ink\)/g, cs.getPropertyValue('--ink').trim() || '#0f1a2e')
-        .replace(/var\(--ink-soft\)/g, cs.getPropertyValue('--ink-soft').trim() || '#55607a')
-        .replace(/var\(--border\)/g, cs.getPropertyValue('--border').trim() || '#e3e6ef')
+        .replace(/var\(--ink\)/g, cs.getPropertyValue('--ink').trim() || '#181417')
+        .replace(/var\(--ink-soft\)/g, cs.getPropertyValue('--ink-soft').trim() || '#61575b')
+        .replace(/var\(--border\)/g, cs.getPropertyValue('--border').trim() || '#e5dede')
         .replace(/var\(--surface\)/g, cs.getPropertyValue('--surface').trim() || '#ffffff')
-        .replace(/var\(--surface-sunken\)/g, cs.getPropertyValue('--surface-sunken').trim() || '#eef0f7')
-        .replace(/var\(--blue\)/g, cs.getPropertyValue('--blue').trim() || '#2f5be8')
+        .replace(/var\(--surface-sunken\)/g, cs.getPropertyValue('--surface-sunken').trim() || '#f0ecec')
+        .replace(/var\(--blue\)/g, cs.getPropertyValue('--blue').trim() || '#dd3333')
+        .replace(/var\(--accent\)/g, cs.getPropertyValue('--accent').trim() || '#dd3333')
         .replace(/var\(--teal\)/g, cs.getPropertyValue('--teal').trim() || '#15803d')
-        .replace(/var\(--brass\)/g, cs.getPropertyValue('--brass').trim() || '#f08a24')
-        .replace(/var\(--danger\)/g, cs.getPropertyValue('--danger').trim() || '#c0392b')
+        .replace(/var\(--brass\)/g, cs.getPropertyValue('--brass').trim() || '#d97706')
+        .replace(/var\(--danger\)/g, cs.getPropertyValue('--danger').trim() || '#991b1b')
 
     const serialized = resolveVars(new XMLSerializer().serializeToString(clone))
     const svgBlob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' })

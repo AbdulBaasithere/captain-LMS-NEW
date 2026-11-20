@@ -282,7 +282,7 @@ const greeting = (() => {
                     <span class="sub">
                       {{ x.course.category }} · {{ x.p.done }} of {{ x.p.total }} completed
                       <template v-if="x.course.dbId && enrolmentByCourseId.get(x.course.dbId)?.assigned_by">
-                        · <b style="color: var(--blue)">Assigned</b>
+                        · <b style="color: var(--accent-text)">Assigned</b>
                       </template>
                       <template v-if="x.course.dbId && enrolmentByCourseId.get(x.course.dbId)?.deadline_date">
                         · Due {{ enrolmentByCourseId.get(x.course.dbId)?.deadline_date }}
@@ -416,7 +416,7 @@ const greeting = (() => {
   position: absolute;
   left: 16px;
   bottom: 16px;
-  background: #0f1b33;
+  background: #181417;
   color: #fff;
   border-radius: 99px;
   padding: 6px 13px;

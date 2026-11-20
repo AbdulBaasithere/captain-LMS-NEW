@@ -34,7 +34,7 @@ const grid = computed(() => {
 function cellStyle(pct: number | null) {
   if (pct === null) return { background: 'var(--surface-sunken)', color: 'var(--ink-soft)' }
   if (pct >= 100) return { background: 'var(--teal)', color: '#fff' }
-  if (pct >= 70) return { background: '#4f86f0', color: '#fff' }
+  if (pct >= 70) return { background: '#0284c7', color: '#fff' }
   if (pct >= 40) return { background: 'var(--brass)', color: '#1a1000' }
   if (pct > 0) return { background: 'var(--danger-soft)', color: 'var(--danger)' }
   return { background: 'var(--surface-sunken)', color: 'var(--ink-soft)' }
@@ -74,7 +74,7 @@ function cellText(pct: number | null) {
         <p v-if="!grid.length" class="sub" style="padding: 16px 0">No one in your team yet.</p>
         <div class="row wrap" style="margin-top: 16px; gap: 14px">
           <span class="sub"><b style="color: var(--teal)">■</b> Complete</span>
-          <span class="sub"><b style="color: #4f86f0">■</b> 70%+</span>
+          <span class="sub"><b style="color: #0284c7">■</b> 70%+</span>
           <span class="sub"><b style="color: var(--brass)">■</b> 40–69%</span>
           <span class="sub"><b style="color: var(--danger)">■</b> Under 40%</span>
           <span class="sub"><b style="color: var(--ink-soft)">■</b> Not started / not assigned</span>
@@ -89,8 +89,8 @@ function cellText(pct: number | null) {
 
 <style scoped>
 .note {
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--accent-soft);
+  color: var(--accent-text);
   padding: 10px 14px;
   border-radius: 12px;
   font-size: 12.5px;

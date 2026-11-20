@@ -761,7 +761,7 @@ function badgeBreakdownText(e: LeaderboardEntry): string {
 }
 
 .podium-slot.is-me .podium-avatar {
-  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--blue);
+  box-shadow: 0 0 0 3px var(--surface), 0 0 0 5px var(--accent);
 }
 
 .podium-name {
@@ -879,14 +879,14 @@ function badgeBreakdownText(e: LeaderboardEntry): string {
 }
 
 .emp-link:hover {
-  color: var(--blue);
+  color: var(--accent-text);
   text-decoration: underline;
 }
 
 .me-tag {
   font-size: 11.5px;
   font-weight: 700;
-  color: var(--blue);
+  color: var(--accent-text);
 }
 
 .metric-primary {

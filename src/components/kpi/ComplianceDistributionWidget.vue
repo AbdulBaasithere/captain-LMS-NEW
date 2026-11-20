@@ -27,9 +27,9 @@ const breakdown = computed(() => {
   const total = Math.max(1, props.employees.length)
   return [
     { name: 'Compliant', value: counts.Compliant, pct: Math.round((counts.Compliant / total) * 100), color: CHART_COLORS.teal },
-    { name: 'In Progress', value: counts['In Progress'], pct: Math.round((counts['In Progress'] / total) * 100), color: CHART_COLORS.blue },
+    { name: 'In Progress', value: counts['In Progress'], pct: Math.round((counts['In Progress'] / total) * 100), color: CHART_COLORS.indigo },
     { name: 'At Risk', value: counts['At Risk'], pct: Math.round((counts['At Risk'] / total) * 100), color: CHART_COLORS.brass },
-    { name: 'Overdue', value: counts.Overdue, pct: Math.round((counts.Overdue / total) * 100), color: CHART_COLORS.danger },
+    { name: 'Overdue', value: counts.Overdue, pct: Math.round((counts.Overdue / total) * 100), color: CHART_COLORS.blue },
   ]
 })
 

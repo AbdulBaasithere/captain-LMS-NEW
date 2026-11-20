@@ -60,7 +60,7 @@ const links = [
         <div class="brandmark"><span class="mark">C</span><span>Captain LMS</span></div>
         <div style="display: flex; align-items: center; gap: 4px">
           <ThemeToggle variant="icon" />
-          <button class="theme-cycle-btn" style="color: #e08975" title="Sign out" @click="logout">⏻</button>
+          <button class="theme-cycle-btn" style="color: #fca5a5" title="Sign out" @click="logout">⏻</button>
           <VersionTag />
         </div>
       </div>

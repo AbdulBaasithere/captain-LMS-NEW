@@ -683,8 +683,8 @@ async function copyCertId() {
 
 .cert-download-btn {
   font-weight: 600;
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+  background: linear-gradient(135deg, #dd3333, #b91c1c);
+  box-shadow: 0 4px 14px rgba(221, 51, 51, 0.36);
 }
 
 @media (max-width: 680px) {

@@ -798,7 +798,7 @@ async function quickDownloadCert(key: string, certData: CertificateData) {
   color: var(--teal);
 }
 .cb-status.pending {
-  color: var(--blue);
+  color: var(--accent-text);
 }
 .cb-rule-meta {
   font-size: 12px;

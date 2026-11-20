@@ -219,7 +219,7 @@ async function previewDigest() {
                   </tr>
                 </tbody>
               </table>
-              <button class="btn btn-sm" style="margin-top: 12px; width: 100%; justify-content: center; background: var(--brass); color: #1a1000" :disabled="!overdue.length || sendingReminders" @click="remindOverdue">
+              <button class="btn btn-primary btn-sm" style="margin-top: 12px; width: 100%; justify-content: center" :disabled="!overdue.length || sendingReminders" @click="remindOverdue">
                 {{ sendingReminders ? 'Sending…' : `✉ Remind all overdue (${overdue.length})` }}
               </button>
               <p v-if="reminderMessage" class="hint">{{ reminderMessage }}</p>
@@ -336,17 +336,17 @@ async function previewDigest() {
 .cell {
   height: 26px;
   border-radius: 6px;
-  background: var(--blue);
+  background: var(--accent);
 }
 .legend-bar {
   width: 90px;
   height: 8px;
   border-radius: 9px;
-  background: linear-gradient(90deg, var(--surface-sunken), var(--blue));
+  background: linear-gradient(90deg, var(--surface-sunken), var(--accent));
 }
 .note {
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--accent-soft);
+  color: var(--accent-text);
   padding: 10px 14px;
   border-radius: 12px;
   font-size: 12.5px;

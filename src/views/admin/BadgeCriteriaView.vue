@@ -1196,9 +1196,9 @@ function ruleCriteriaLine(b: BadgeCriterion): string {
   cursor: pointer;
 }
 .preset-btn.on {
-  border-color: var(--blue);
-  color: var(--blue);
-  background: var(--blue-soft);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  background: var(--accent-soft);
 }
 .section-card {
   margin-bottom: 18px;
@@ -1284,7 +1284,7 @@ function ruleCriteriaLine(b: BadgeCriterion): string {
   color: var(--ink);
 }
 .emp-link:hover {
-  color: var(--blue);
+  color: var(--accent-text);
 }
 .unlocked-text {
   font-weight: 600;
@@ -1333,7 +1333,7 @@ function ruleCriteriaLine(b: BadgeCriterion): string {
   border-bottom: none;
 }
 .award-emp-row.selected {
-  background: rgba(59, 130, 246, 0.1);
+  background: var(--accent-soft);
 }
 .award-emp-row input[type='checkbox'] {
   width: 16px;

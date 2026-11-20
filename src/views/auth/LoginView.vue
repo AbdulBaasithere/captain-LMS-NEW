@@ -140,6 +140,9 @@ async function submit() {
   justify-content: center;
   padding: 24px;
   position: relative;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(221, 51, 51, 0.08), transparent 48%),
+    radial-gradient(circle at 82% 85%, rgba(221, 51, 51, 0.05), transparent 45%);
 }
 .auth-theme-toggle {
   position: fixed;
@@ -160,24 +163,34 @@ async function submit() {
   box-shadow: var(--shadow);
   border: 1px solid var(--border);
 }
+.auth-visual {
+  background:
+    radial-gradient(circle at 85% 15%, rgba(221, 51, 51, 0.52), transparent 55%),
+    radial-gradient(circle at 10% 95%, rgba(217, 119, 6, 0.22), transparent 45%),
+    linear-gradient(160deg, #171215, #291418 60%, #141013);
+  color: #f6f2f3;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
 @media (max-width: 720px) {
   .auth-card {
     grid-template-columns: 1fr;
   }
   .auth-visual {
+    padding: 20px 24px;
+  }
+  .auth-visual .brandmark {
+    padding: 0;
+  }
+  .auth-visual blockquote,
+  .auth-visual .badge-strip {
     display: none;
   }
-}
-.auth-visual {
-  background:
-    radial-gradient(circle at 85% 15%, rgba(47, 91, 232, 0.55), transparent 55%),
-    radial-gradient(circle at 10% 95%, rgba(240, 138, 36, 0.28), transparent 45%),
-    linear-gradient(160deg, #0f1b33, #16264a 60%, #0f1b33);
-  color: #f1f2f6;
-  padding: 40px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  .auth-form {
+    padding: 26px 24px;
+  }
 }
 .auth-visual blockquote {
   font-family: 'Newsreader';
@@ -240,7 +253,7 @@ async function submit() {
 .auth-switch button {
   background: none;
   border: none;
-  color: var(--brass-strong);
+  color: var(--accent-text);
   cursor: pointer;
   font-weight: 600;
   font-size: 13px;

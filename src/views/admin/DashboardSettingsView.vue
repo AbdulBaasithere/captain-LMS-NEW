@@ -9,7 +9,7 @@ const auth = useAuthStore()
 const store = useWidgetsStore()
 const error = ref('')
 const roles: WidgetRole[] = ['Employee', 'Manager', 'Admin']
-const roleColor: Record<WidgetRole, string> = { Employee: 'var(--blue)', Manager: '#0f7f6c', Admin: '#b4530f' }
+const roleColor: Record<WidgetRole, string> = { Employee: 'var(--accent)', Manager: '#0f7f6c', Admin: '#b4530f' }
 
 onMounted(() => {
   if (!store.loaded) void store.load()
@@ -105,8 +105,8 @@ async function reset() {
 
 <style scoped>
 .note {
-  background: var(--blue-soft);
-  color: var(--blue);
+  background: var(--accent-soft);
+  color: var(--accent-text);
   padding: 10px 14px;
   border-radius: 12px;
   font-size: 12.5px;

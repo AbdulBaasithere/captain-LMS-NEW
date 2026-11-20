@@ -100,7 +100,7 @@ const colorFor = { done: 'var(--teal)', due: 'var(--blue)', quiz: 'var(--brass)'
           <template v-for="(c, i) in cells" :key="i">
             <div v-if="!c" />
             <div v-else class="cell" :class="{ today: c.iso === today }">
-              <b :style="c.iso === today ? 'color: var(--blue)' : ''">{{ c.day }}</b>
+              <b :style="c.iso === today ? 'color: var(--accent-text)' : ''">{{ c.day }}</b>
               <component
                 :is="e.to ? 'RouterLink' : 'div'"
                 v-for="(e, k) in (events.get(c.iso) ?? []).slice(0, 2)"
@@ -160,8 +160,8 @@ const colorFor = { done: 'var(--teal)', due: 'var(--blue)', quiz: 'var(--brass)'
   padding: 7px;
 }
 .cell.today {
-  background: var(--blue-soft);
-  border-color: var(--blue);
+  background: var(--accent-soft);
+  border-color: var(--accent);
 }
 .ev {
   display: block;

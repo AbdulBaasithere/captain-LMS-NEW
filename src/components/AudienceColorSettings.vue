@@ -402,7 +402,7 @@ async function handleRemoveAudience(row: { id: number | null; name: string }) {
   height: 26px;
   border-radius: 8px;
   flex: none;
-  border: 1px solid rgba(15, 26, 46, 0.14);
+  border: 1px solid var(--border);
 }
 .aud-name {
   font-size: 14px;

@@ -427,11 +427,11 @@ async function removeEnrolment(e: CourseEnrolment) {
   height: 12px;
   border-radius: 4px;
   flex: none;
-  border: 1px solid rgba(15, 26, 46, 0.16);
+  border: 1px solid var(--border);
 }
 .aud-settings-link {
   margin-left: auto;
-  color: var(--blue);
+  color: var(--accent-text);
   font-weight: 600;
   text-decoration: none;
 }

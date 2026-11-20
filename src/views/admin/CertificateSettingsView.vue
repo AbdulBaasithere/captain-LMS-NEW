@@ -1198,7 +1198,7 @@ async function downloadSamplePdf() {
 
 .slider-row input[type='range'] {
   width: 100%;
-  accent-color: #3b82f6;
+  accent-color: var(--accent);
 }
 
 .compact-num {
@@ -1219,8 +1219,8 @@ async function downloadSamplePdf() {
 }
 
 .mini-action-btn:hover {
-  border-color: #3b82f6;
-  color: #93c5fd;
+  border-color: var(--accent);
+  color: var(--accent-text);
 }
 
 .color-input-compact {
@@ -1260,8 +1260,8 @@ async function downloadSamplePdf() {
 }
 
 .align-seg button.active {
-  background: rgba(37, 99, 235, 0.3);
-  color: #93c5fd;
+  background: var(--accent-soft);
+  color: var(--accent-text);
 }
 
 .mode-tabs {
@@ -1282,7 +1282,7 @@ async function downloadSamplePdf() {
 }
 
 .mode-tab.active {
-  background: #2563eb;
+  background: var(--accent);
   color: #ffffff;
 }
 
@@ -1348,8 +1348,8 @@ async function downloadSamplePdf() {
   margin-top: 16px;
   padding: 20px;
   border-radius: 10px;
-  border: 1.5px dashed rgba(59, 130, 246, 0.35);
-  background: rgba(59, 130, 246, 0.04);
+  border: 1.5px dashed rgba(221, 51, 51, 0.4);
+  background: var(--accent-soft);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1511,7 +1511,7 @@ async function downloadSamplePdf() {
 }
 
 .recipient-item.selected {
-  background: rgba(59, 130, 246, 0.1);
+  background: var(--accent-soft);
 }
 
 .recipient-item input[type='checkbox'] {

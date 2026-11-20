@@ -1,12 +1,12 @@
 import React from 'react'
 
 export const CHART_COLORS = {
-  blue: '#2f5be8',
+  blue: '#dd3333',
   teal: '#15803d',
-  brass: '#f08a24',
-  danger: '#c0392b',
-  indigo: '#6d3fc0',
-  slate: '#64748b',
+  brass: '#d97706',
+  danger: '#991b1b',
+  indigo: '#0284c7',
+  slate: '#475569',
 } as const
 
 export function h(
@@ -33,7 +33,7 @@ export const TOOLTIP_CONTENT_STYLE: React.CSSProperties = {
   backgroundColor: 'var(--surface)',
   border: '1px solid var(--border)',
   borderRadius: '10px',
-  boxShadow: '0 8px 24px -8px rgba(15, 26, 46, 0.25)',
+  boxShadow: '0 8px 24px -8px rgba(24, 20, 23, 0.28)',
   color: 'var(--ink)',
   fontSize: '12.5px',
   fontFamily: "'Plus Jakarta Sans', sans-serif",
