@@ -273,6 +273,9 @@ export function useOnboardingTour() {
     if (!userId) return
     try {
       if (localStorage.getItem(storageKey(role, userId))) return
+      // Mark as seen immediately so the tour never auto-opens again,
+      // even if the user closes the tab, navigates away, or skips mid-tour.
+      localStorage.setItem(storageKey(role, userId), '1')
     } catch {
       return
     }
@@ -289,12 +292,9 @@ export function useOnboardingTour() {
     void ensureTutorialsLoaded()
   }
 
-  function markSeenAndClose(userId?: string | null) {
-    try {
-      if (userId) localStorage.setItem(storageKey(activeRole.value, userId), '1')
-    } catch {
-      // ignore storage errors
-    }
+  function markSeenAndClose(_userId?: string | null) {
+    // localStorage is already written at tour-open time for the auto-tour path.
+    // This function just closes the modal (also used by replayTour).
     isOpen.value = false
   }
 
