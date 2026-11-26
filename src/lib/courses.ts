@@ -1,0 +1,148 @@
+import { supabase } from '@/lib/supabase'
+import type { Course, CourseDifficulty, Module, VideoCompletion } from '@/lib/database.types'
+import {
+  COURSE_DIFFICULTIES,
+  filterCatalogCourses,
+  normalizeDifficulty,
+  resolveCourseDifficulty,
+  type CatalogFilterCriteria,
+} from './courseFilters'
+import { hasAnyVideo } from './materialHelpers'
+import { hydrateModulesUploadedVideos } from './materials'
+
+export {
+  COURSE_DIFFICULTIES,
+  filterCatalogCourses,
+  normalizeDifficulty,
+  resolveCourseDifficulty,
+  type CatalogFilterCriteria,
+}
+
+export const COURSE_COLORS = [
+  '#2f5be8', // Blue
+  '#eab308', // Yellow
+  '#0f7f6c', // Teal
+  '#6d3fc0', // Purple
+  '#f08a24', // Orange
+  '#a3306b', // Rose
+  '#1d8348', // Green
+  '#0284c7', // Sky
+  '#1f4e8c', // Deep Blue
+  '#0f1b33', // Navy
+]
+
+/** A course as the screens use it: the course row (or a virtual one) plus its ordered lessons. */
+export interface CourseVM {
+  id: string // the course id, or `dept-<audience>` for the automatic fallback groups
+  dbId: number | null // null for virtual courses (before the revamp SQL has been run)
+  title: string
+  category: string
+  difficulty: CourseDifficulty
+  color: string
+  description: string | null
+  isPublished: boolean
+  lessons: Module[]
+}
+
+export function courseCode(title: string): string {
+  const words = title.replace(/&/g, ' ').split(/\s+/).filter(Boolean)
+  if (!words.length) return '?'
+  return (words.length > 1 ? words[0]![0]! + words[1]![0]! : words[0]!.slice(0, 2)).toUpperCase()
+}
+
+export function sortedLessons(lessons: Module[]): Module[] {
+  return [...lessons].sort((a, b) => (a.lesson_order ?? 0) - (b.lesson_order ?? 0) || a.id - b.id)
+}
+
+/**
+ * Loads courses and their lessons. If the courses table doesn't exist yet (revamp SQL not run),
+ * falls back to one virtual course per audience so the catalog still works.
+ */
+export async function loadCourses(rawModules: Module[], options: { includeUnpublished?: boolean } = {}): Promise<CourseVM[]> {
+  const modules = await hydrateModulesUploadedVideos(rawModules)
+  const { data, error } = await supabase.from('courses').select('*').order('id')
+  if (error || !data) return virtualCourses(modules)
+
+  const courses = (data as Course[]).filter((c) => options.includeUnpublished || c.is_published)
+  const byCourse = new Map<number, Module[]>()
+  const unassigned: Module[] = []
+  for (const m of modules) {
+    if (m.course_id) byCourse.set(m.course_id, [...(byCourse.get(m.course_id) ?? []), m])
+    else unassigned.push(m)
+  }
+  const result: CourseVM[] = courses.map((c) => {
+    const lessons = sortedLessons(byCourse.get(c.id) ?? [])
+    return {
+      id: String(c.id),
+      dbId: c.id,
+      title: c.title,
+      category: c.category,
+      difficulty: resolveCourseDifficulty(c.difficulty, c.title, c.description, lessons),
+      color: c.color,
+      description: c.description,
+      isPublished: c.is_published,
+      lessons,
+    }
+  })
+  // Lessons not yet placed in a course still need a home so nothing is invisible.
+  if (unassigned.length) {
+    for (const v of virtualCourses(unassigned)) result.push({ ...v, title: `${v.title} (not in a course yet)` })
+  }
+  return result
+}
+
+function virtualCourses(modules: Module[]): CourseVM[] {
+  const groups = new Map<string, Module[]>()
+  for (const m of modules) groups.set(m.department, [...(groups.get(m.department) ?? []), m])
+  return [...groups.entries()].map(([dept, rawLessons], i) => {
+    const lessons = sortedLessons(rawLessons)
+    const title = dept === 'General' ? 'Company-wide training' : `${dept} training`
+    return {
+      id: `dept-${dept}`,
+      dbId: null,
+      title,
+      category: dept,
+      difficulty: resolveCourseDifficulty(null, title, null, lessons),
+      color: COURSE_COLORS[i % COURSE_COLORS.length]!,
+      description: null,
+      isPublished: true,
+      lessons,
+    }
+  })
+}
+
+export interface CourseProgress {
+  done: number
+  total: number
+  pct: number
+  status: 'not-started' | 'in-progress' | 'completed'
+  nextLesson: Module | null
+  minutes: number
+  videos: number
+  docs: number
+}
+
+export function courseProgress(course: CourseVM, completions: VideoCompletion[]): CourseProgress {
+  const doneIds = new Set(completions.filter((c) => c.completed).map((c) => c.module_id))
+  const startedIds = new Set(completions.filter((c) => c.watched_seconds > 0 || c.completed).map((c) => c.module_id))
+  const total = course.lessons.length
+  const done = course.lessons.filter((l) => doneIds.has(l.id)).length
+  const started = course.lessons.some((l) => startedIds.has(l.id))
+  return {
+    done,
+    total,
+    pct: total ? Math.round((done / total) * 100) : 0,
+    status: total > 0 && done === total ? 'completed' : done > 0 || started ? 'in-progress' : 'not-started',
+    nextLesson: course.lessons.find((l) => !doneIds.has(l.id)) ?? null,
+    minutes: Math.round(course.lessons.reduce((sum, l) => sum + (hasAnyVideo(l) ? l.duration_seconds : 0), 0) / 60),
+    videos: course.lessons.filter((l) => hasAnyVideo(l)).length,
+    docs: course.lessons.filter((l) => !hasAnyVideo(l) && !!l.document_url).length,
+  }
+}
+
+export function formatCourseTime(minutes: number): string {
+  if (minutes < 1) return '—'
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return h ? `${h}h ${String(m).padStart(2, '0')}m` : `${m}m`
+}

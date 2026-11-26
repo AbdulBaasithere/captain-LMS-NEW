@@ -1,0 +1,189 @@
+<script setup lang="ts">
+import { ref, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
+import { supabase } from '@/lib/supabase'
+import { useAuthStore } from '@/stores/auth'
+import { milestoneLabel, type Milestone } from '@/lib/quiz'
+import { downloadCertificatePdf } from '@/lib/certificate'
+import { syncCertificateConfigFromServer } from '@/lib/certificateConfig'
+
+const BADGE_NAMES: Record<string, string> = {
+  '1': 'Bronze',
+  '2': 'Silver',
+  '3': 'Gold',
+  '4': 'Diamond',
+  '5': 'Diamond II',
+  final: 'Captain Master',
+}
+
+const route = useRoute()
+const auth = useAuthStore()
+const milestone = route.params.milestone as Milestone
+const earnedAt = ref<string | null>(null)
+const found = ref(false)
+const downloading = ref(false)
+
+onMounted(async () => {
+  if (!auth.profile) return
+  const [, { data }] = await Promise.all([
+    syncCertificateConfigFromServer(),
+    supabase
+      .from('quiz_attempts')
+      .select('created_at')
+      .eq('user_id', auth.profile.id)
+      .eq('milestone', milestone)
+      .eq('passed', true)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+  ])
+  if (data) {
+    earnedAt.value = data.created_at
+    found.value = true
+  }
+})
+
+function formattedDate(iso: string) {
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+}
+
+async function downloadPdf() {
+  if (!auth.profile) return
+  downloading.value = true
+  try {
+    const config = await syncCertificateConfigFromServer()
+    await downloadCertificatePdf(
+      {
+        userName: auth.profile.full_name || 'Learner',
+        userDepartment: auth.profile.department,
+        courseTitle: `${milestoneLabel(milestone)} Evaluation`,
+        courseCategory: `${BADGE_NAMES[milestone] ?? 'Achievement'} Tier`,
+        completedDate: earnedAt.value ? formattedDate(earnedAt.value) : formattedDate(new Date().toISOString()),
+        certificateId: `CAP-MILESTONE-${String(milestone).toUpperCase()}-${auth.profile.id.slice(0, 6).toUpperCase()}`,
+        totalLessons: 1,
+        totalMinutes: 30,
+      },
+      config,
+    )
+  } finally {
+    downloading.value = false
+  }
+}
+</script>
+
+<template>
+  <div>
+    <div class="topline">
+      <div><h2 style="font-size: 20px">Certificate</h2></div>
+      <div class="row" style="gap: 8px">
+        <button v-if="found" class="btn btn-primary btn-sm" :disabled="downloading" @click="downloadPdf">
+          <span v-if="downloading">⏳ Generating PDF…</span>
+          <span v-else>📥 Download PDF Certificate</span>
+        </button>
+        <RouterLink class="btn btn-ghost btn-sm" to="/app/badges">Back to badges</RouterLink>
+      </div>
+    </div>
+
+    <div v-if="!found" class="card" style="padding: 24px; color: var(--ink-soft)">Certificate not found for this milestone.</div>
+
+    <div v-else class="certificate">
+      <div class="cert-inner">
+        <div class="cert-medal">{{ milestone === 'final' ? '🏆' : '🎖️' }}</div>
+        <div class="cert-kicker">Certificate of Completion</div>
+        <h1 class="cert-name">{{ auth.profile?.full_name }}</h1>
+        <p class="cert-body">has successfully passed the</p>
+        <h2 class="cert-milestone">{{ milestoneLabel(milestone) }}</h2>
+        <p class="cert-body">and earned the</p>
+        <div class="cert-badge-name">{{ BADGE_NAMES[milestone] }} Badge</div>
+        <div class="cert-date">{{ earnedAt ? formattedDate(earnedAt) : '' }}</div>
+        <div class="cert-brand-wrap">
+          <div class="cert-logo-badge">
+            <img src="/assets/aistudio/captain-logo_d6af1701.png" alt="Captain — We create bonds" />
+          </div>
+          <div class="cert-brand">CAPTAIN LMS</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.certificate {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.cert-inner {
+  background: var(--surface);
+  border: 3px double var(--brass);
+  border-radius: 14px;
+  padding: 48px 32px;
+  text-align: center;
+  box-shadow: var(--shadow);
+}
+.cert-medal {
+  font-size: 44px;
+  margin-bottom: 8px;
+}
+.cert-kicker {
+  font: 600 12px 'Plus Jakarta Sans';
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin-bottom: 16px;
+}
+.cert-name {
+  font-size: 32px;
+  margin-bottom: 12px;
+}
+.cert-body {
+  color: var(--ink-soft);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+.cert-milestone {
+  font-size: 22px;
+  margin: 8px 0;
+  color: var(--brass-strong);
+}
+.cert-badge-name {
+  display: inline-block;
+  margin: 12px 0 20px;
+  padding: 6px 18px;
+  border-radius: 999px;
+  background: var(--brass-soft);
+  color: var(--brass-strong);
+  font-weight: 700;
+  font-size: 14px;
+}
+.cert-date {
+  color: var(--ink-soft);
+  font-size: 13px;
+  margin-bottom: 24px;
+}
+.cert-brand-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.cert-logo-badge {
+  background: #ffffff;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cert-logo-badge img {
+  height: 28px;
+  width: auto;
+  display: block;
+  object-fit: contain;
+}
+.cert-brand {
+  font: 700 13px 'IBM Plex Mono', monospace;
+  letter-spacing: 0.1em;
+  color: var(--ink-soft);
+}
+</style>
