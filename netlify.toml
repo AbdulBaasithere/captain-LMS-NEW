@@ -3,6 +3,19 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+
+# Keep Netlify function paths from being swallowed by the SPA redirect below.
+# Netlify evaluates redirects top-to-bottom; this 200 pass-through rule with
+# force = false is overridden by the function runtime, which always wins for
+# /.netlify/functions/*, but adding it explicitly avoids edge-case routing bugs.
+[[redirects]]
+  from = "/.netlify/functions/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = false
+
 # Vue Router uses history mode — send every unmatched path to index.html so
 # refreshing on e.g. /app/dashboard doesn't 404.
 [[redirects]]
